@@ -1,0 +1,9 @@
+name = "stock-sim-api"
+main = "src/entry.py"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["python_workers"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "stock-sim"
+database_id = "REPLACE_WITH_ID_FROM_wrangler_d1_create"

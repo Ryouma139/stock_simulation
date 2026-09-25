@@ -1,0 +1,4 @@
+yfinance>=0.2.40
+pandas>=2.0
+xlrd>=2.0  # --jpx（東証の銘柄一覧 .xls）の読み込み用
+requests>=2.31

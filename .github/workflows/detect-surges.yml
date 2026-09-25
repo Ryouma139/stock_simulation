@@ -1,0 +1,29 @@
+name: detect +10% surges
+
+on:
+  workflow_dispatch:
+    inputs:
+      jpx:
+        description: "東証の全上場銘柄を対象にする"
+        type: boolean
+        default: false
+  # D1 のシークレットを設定したら有効化（平日 16:30 JST = 大引け後）
+  # schedule:
+  #   - cron: "30 7 * * 1-5"
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover tests
+      - name: Detect surges and save to D1
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+        run: python scripts/detect_surges.py ${{ inputs.jpx && '--jpx' || '' }}

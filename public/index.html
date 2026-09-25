@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>積立シミュレーター</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f4f3ef;
+    --surface-1: #fcfcfb;
+    --border: #e2e0da;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #7a7974;
+    --grid: #e9e7e1;
+    --series-1: #2a78d6; /* 評価額 */
+    --series-2: #eb6834; /* 元本 */
+    --good: #008300;
+    --critical: #c62f2e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-0: #111110;
+      --surface-1: #1a1a19;
+      --border: #2e2e2c;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #8f8e86;
+      --grid: #2a2a28;
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --good: #3fae3f;
+      --critical: #e66767;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #111110;
+    --surface-1: #1a1a19;
+    --border: #2e2e2c;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8f8e86;
+    --grid: #2a2a28;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --good: #3fae3f;
+    --critical: #e66767;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--surface-0); color: var(--text-primary);
+    font: 15px/1.6 system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .lead { color: var(--text-secondary); margin: 0 0 20px; font-size: 14px; }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+  input, select {
+    font: inherit; font-size: 15px; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-0); color: var(--text-primary);
+  }
+  input:disabled { opacity: .5; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .tile .k { font-size: 12px; color: var(--text-secondary); }
+  .tile .v { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tile .v.pos { color: var(--good); }
+  .tile .v.neg { color: var(--critical); }
+  .chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .chart-head h2 { font-size: 16px; margin: 0; }
+  .legend { display: flex; gap: 16px; font-size: 13px; color: var(--text-secondary); }
+  .legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+  .chart-wrap { position: relative; height: 360px; }
+  #status { color: var(--text-muted); font-size: 13px; margin: 8px 0 0; }
+  details { margin-top: 16px; }
+  summary { cursor: pointer; color: var(--text-secondary); font-size: 14px; }
+  .table-wrap { max-height: 320px; overflow: auto; margin-top: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  th { position: sticky; top: 0; background: var(--surface-1); color: var(--text-secondary); font-weight: 500; }
+  .rank { margin-top: 16px; }
+  .rank h2 { font-size: 16px; margin: 0 0 4px; }
+  .rank p { font-size: 13px; color: var(--text-secondary); margin: 0 0 8px; }
+  .rank th:nth-child(2), .rank td:nth-child(2) { text-align: left; }
+  .rank tbody tr { cursor: pointer; }
+  .rank tbody tr:hover, .rank tbody tr.sel { background: var(--surface-0); }
+  .bar { display: inline-block; height: 6px; border-radius: 0 3px 3px 0; background: var(--series-1); vertical-align: middle; margin-right: 6px; }
+  .src { font-size: 12px; color: var(--text-muted); }
+  .note { font-size: 12px; color: var(--text-muted); margin-top: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>積立・リターン シミュレーター</h1>
+  <p class="lead">想定年率（初期値 10%）で運用した場合と、銘柄の実際の株価で毎月積み立てた場合を比較できます。計算はブラウザ内の Python（Pyodide）で実行します。</p>
+
+  <section class="card controls" aria-label="条件">
+    <label>モード
+      <select id="mode">
+        <option value="fixed">想定年率で計算</option>
+        <option value="historical">銘柄の過去株価で計算</option>
+      </select>
+    </label>
+    <label>銘柄
+      <select id="ticker"></select>
+    </label>
+    <label>想定年率（%）
+      <input id="rate" type="number" value="10" step="0.5" min="-50" max="100">
+    </label>
+    <label>初期投資額（円）
+      <input id="initial" type="number" value="0" step="10000" min="0">
+    </label>
+    <label>毎月の積立額（円）
+      <input id="monthly" type="number" value="30000" step="1000" min="0">
+    </label>
+    <label>期間（年）
+      <input id="years" type="number" value="20" step="1" min="1" max="50">
+    </label>
+  </section>
+
+  <section class="tiles" aria-live="polite">
+    <div class="card tile"><div class="k">最終評価額</div><div class="v" id="t-final">—</div></div>
+    <div class="card tile"><div class="k">元本合計</div><div class="v" id="t-contrib">—</div></div>
+    <div class="card tile"><div class="k">損益</div><div class="v" id="t-profit">—</div></div>
+    <div class="card tile"><div class="k">元本に対する騰落率</div><div class="v" id="t-ret">—</div></div>
+  </section>
+
+  <section class="card">
+    <div class="chart-head">
+      <h2 id="chart-title">資産推移</h2>
+      <div class="legend">
+        <span><i style="background:var(--series-1)"></i>評価額</span>
+        <span><i style="background:var(--series-2)"></i>元本</span>
+      </div>
+    </div>
+    <div class="chart-wrap"><canvas id="chart" aria-label="資産推移グラフ" role="img"></canvas></div>
+    <p id="status">Python を読み込み中…</p>
+    <details>
+      <summary>表で見る（年ごと）</summary>
+      <div class="table-wrap"><table id="table"></table></div>
+    </details>
+  </section>
+
+  <section class="card rank">
+    <h2>人気銘柄ランキング（前日比 +10% 以上の急騰記録）</h2>
+    <p>何度も・最近・大きく急騰した銘柄ほど人気スコアが高くなります（30日で重みが半分）。行をクリックすると、その銘柄でシミュレーションします。<span class="src" id="src"></span></p>
+    <div class="table-wrap"><table id="rank"></table></div>
+  </section>
+
+  <p class="note">※ シミュレーション結果は将来の運用成果を保証するものではありません。税金・手数料は考慮していません。「サンプル銘柄」は動作確認用の架空データです。</p>
+</main>
+
+<script src="config.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const yen = (v) => Math.round(v).toLocaleString("ja-JP") + " 円";
+const man = (v) => (v / 10000).toLocaleString("ja-JP", { maximumFractionDigits: 0 }) + "万";
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+let py, runSim, runHist, chart;
+const priceCache = {};
+const API = (window.SIM_API_BASE || "").replace(/\/$/, "");
+let tickers = [];   // DB（人気スコア順）または静的 JSON の銘柄一覧
+let useApi = false;
+
+// 銘柄一覧を DB（Worker API）から人気順に取得。API 未設定・失敗時は静的 JSON を使う
+async function loadTickers() {
+  if (API) {
+    try {
+      const res = await fetch(`${API}/api/tickers?limit=50`);
+      if (!res.ok) throw new Error(res.status);
+      tickers = await res.json();
+      useApi = tickers.length > 0;
+    } catch (e) { console.warn("API から銘柄を取得できませんでした。静的データを使います", e); }
+  }
+  if (!useApi) tickers = await (await fetch("data/index.json")).json();
+  $("src").textContent = useApi ? "（データ: D1）" : "（データ: 静的サンプル）";
+
+  const sel = $("ticker");
+  sel.replaceChildren(...tickers.map(t => {
+    const o = document.createElement("option");
+    o.value = t.ticker;
+    o.textContent = t.hit_count ? `${t.name}（${t.ticker}）★${t.hit_count}` : `${t.name}（${t.ticker}）`;
+    return o;
+  }));
+  drawRanking();
+}
+
+function drawRanking() {
+  const max = Math.max(...tickers.map(t => t.popularity_score || 0), 0);
+  const head = "<thead><tr><th>順位</th><th>銘柄</th><th>急騰記録</th><th>直近の前日比</th><th>最終記録日</th><th>人気スコア</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  if (!tickers.some(t => t.hit_count)) {
+    tbody.innerHTML = '<tr><td colspan="6">まだ急騰記録がありません（scripts/detect_surges.py を実行すると DB に蓄積されます）</td></tr>';
+  }
+  tickers.filter(t => t.hit_count).forEach((t, i) => {
+    const tr = document.createElement("tr");
+    tr.dataset.ticker = t.ticker;
+    const cells = [
+      i + 1, `${t.name}（${t.ticker}）`, `${t.hit_count} 回`,
+      t.last_change_pct != null ? `+${t.last_change_pct.toFixed(1)}%` : "—",
+      t.last_hit_date || "—", null,
+    ];
+    cells.forEach((c, k) => {
+      const td = document.createElement("td");
+      if (k === 5) {
+        const bar = document.createElement("span");
+        bar.className = "bar";
+        bar.style.width = (max ? (t.popularity_score / max) * 60 : 0) + "px";
+        td.append(bar, t.popularity_score.toFixed(2));
+      } else td.textContent = c;
+      tr.append(td);
+    });
+    tr.addEventListener("click", () => {
+      $("mode").value = "historical";
+      $("ticker").value = t.ticker;
+      update();
+    });
+    tbody.append(tr);
+  });
+  $("rank").innerHTML = head;
+  $("rank").append(tbody);
+}
+
+async function loadPrices(ticker) {
+  if (!priceCache[ticker]) {
+    if (useApi) {
+      priceCache[ticker] = await (await fetch(`${API}/api/prices?ticker=${encodeURIComponent(ticker)}`)).json();
+    } else {
+      const file = tickers.find(t => t.ticker === ticker).file;
+      priceCache[ticker] = await (await fetch("data/" + file)).json();
+    }
+  }
+  return priceCache[ticker];
+}
+
+function syncInputs() {
+  const hist = $("mode").value === "historical";
+  $("rate").disabled = hist;
+  $("years").disabled = hist;
+  $("ticker").disabled = !hist;
+}
+
+function drawChart(rows, labels) {
+  const data = {
+    labels,
+    datasets: [
+      { label: "評価額", data: rows.map(r => r.value), borderColor: css("--series-1"),
+        backgroundColor: css("--series-1"), borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, tension: 0.15 },
+      { label: "元本", data: rows.map(r => r.contributed), borderColor: css("--series-2"),
+        backgroundColor: css("--series-2"), borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, tension: 0 },
+    ],
+  };
+  const grid = css("--grid"), muted = css("--text-muted");
+  if (chart) chart.destroy();
+  chart = new Chart($("chart"), {
+    type: "line",
+    data,
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${yen(c.parsed.y)}` } },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: muted, maxRotation: 0, autoSkip: false,
+             // 目盛りはおよそ 8 本・キリの良い「年」だけに絞る
+             callback(v, i) {
+               const step = 12 * Math.max(1, Math.ceil(labels.length / 12 / 8));
+               return i % step === 0 ? this.getLabelForValue(v) : null;
+             } } },
+        y: { grid: { color: grid }, border: { display: false }, beginAtZero: true,
+             ticks: { color: muted, callback: (v) => man(v) } },
+      },
+    },
+  });
+}
+
+function drawTable(rows, labels) {
+  const yearly = rows.filter((_, i) => i % 12 === 0 || i === rows.length - 1);
+  const idx = rows.map((_, i) => i).filter(i => i % 12 === 0 || i === rows.length - 1);
+  $("table").innerHTML =
+    "<thead><tr><th>時点</th><th>元本</th><th>評価額</th><th>損益</th></tr></thead><tbody>" +
+    yearly.map((r, k) => `<tr><td>${labels[idx[k]]}</td><td>${yen(r.contributed)}</td><td>${yen(r.value)}</td><td>${yen(r.value - r.contributed)}</td></tr>`).join("") +
+    "</tbody>";
+}
+
+async function update() {
+  if (!runSim) return;
+  syncInputs();
+  document.querySelectorAll("#rank tbody tr").forEach(tr =>
+    tr.classList.toggle("sel", $("mode").value === "historical" && tr.dataset.ticker === $("ticker").value));
+  const mode = $("mode").value;
+  const initial = Number($("initial").value) || 0;
+  const monthly = Number($("monthly").value) || 0;
+  const years = Math.max(1, Number($("years").value) || 1);
+  const rate = (Number($("rate").value) || 0) / 100;
+
+  let prices = null, pyPrices = null, labels;
+  if (mode === "historical") {
+    const d = await loadPrices($("ticker").value);
+    prices = d.prices;
+    pyPrices = py.toPy(prices);
+    const cagr = runHist(pyPrices) * 100;
+    $("chart-title").textContent = `資産推移：${d.name}（${prices[0].date}〜${prices.at(-1).date}・株価の実績年率 ${cagr.toFixed(1)}%）`;
+  } else {
+    $("chart-title").textContent = `資産推移：年率 ${(rate * 100).toFixed(1)}% で ${years} 年`;
+  }
+
+  const res = runSim(mode, initial, monthly, years, rate, pyPrices).toJs({ dict_converter: Object.fromEntries });
+  pyPrices?.destroy();
+
+  const rows = res.rows;
+  labels = prices ? rows.map(r => r.date) : rows.map(r => `${Math.floor(r.month / 12)}年${r.month % 12 ? r.month % 12 + "ヶ月" : ""}`);
+
+  const s = res.summary;
+  $("t-final").textContent = yen(s.final_value);
+  $("t-contrib").textContent = yen(s.contributed);
+  $("t-profit").textContent = (s.profit >= 0 ? "+" : "") + yen(s.profit);
+  $("t-profit").className = "v " + (s.profit >= 0 ? "pos" : "neg");
+  $("t-ret").textContent = (s.return_pct >= 0 ? "+" : "") + s.return_pct.toFixed(1) + "%";
+  $("t-ret").className = "v " + (s.return_pct >= 0 ? "pos" : "neg");
+
+  drawChart(rows, labels);
+  drawTable(rows, labels);
+}
+
+async function main() {
+  await loadTickers();
+  syncInputs();
+  py = await loadPyodide();
+  py.runPython(await (await fetch("sim.py")).text());
+  runSim = py.globals.get("run");
+  runHist = py.globals.get("historical_annual_rate");
+  $("status").textContent = "条件を変えると自動で再計算します。";
+  ["mode", "ticker", "rate", "initial", "monthly", "years"].forEach(id => $(id).addEventListener("input", update));
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", update);
+  update();
+}
+main().catch(e => { $("status").textContent = "読み込みに失敗しました: " + e; console.error(e); });
+</script>
+</body>
+</html>
