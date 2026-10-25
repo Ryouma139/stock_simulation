@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT / "public"))
 from db import SqliteClient  # noqa: E402
 from detect_surges import refresh_scores, save_monthly_prices, save_surges  # noqa: E402
 from export_snapshot import build_snapshot  # noqa: E402
-from sim import run, simulate_fixed, simulate_from_price  # noqa: E402
+from sim import run, simulate_fixed, simulate_from_price, surge_lump_sums  # noqa: E402
 from sync_notion import block_lines, find_ticker, known_tickers, parse_row, save_notion_surges  # noqa: E402
 
 TODAY = date(2026, 10, 25)
@@ -150,6 +150,14 @@ class SurgeSimTest(unittest.TestCase):
         fixed = simulate_fixed(100000, 30000, 20, 0.10)[-1]
         self.assertAlmostEqual(surge["value"], fixed["value"], places=4)
         self.assertAlmostEqual(surge["contributed"], fixed["contributed"])
+
+    def test_lump_sum_one_day_and_hold(self):
+        res = surge_lump_sums(1_000_000, 102, 130, 20, 0.10)
+        self.assertAlmostEqual(res["one_day"]["profit"], 1_000_000 * (130 / 102 - 1))  # 前日終値で買って急騰日に売る
+        self.assertAlmostEqual(res["one_day"]["units"], 1_000_000 / 102)
+        self.assertAlmostEqual(res["hold"]["value"], 1_000_000 * 1.1 ** 20)            # 急騰日の終値で買って 20 年
+        self.assertAlmostEqual(res["hold"]["return_pct"], (1.1 ** 20 - 1) * 100)
+        self.assertEqual(surge_lump_sums(0, 102, 130, 20)["one_day"]["profit"], 0)
 
     def test_run_dispatches_surge_mode(self):
         res = run("surge", 0, 30000, 1, 0.10, start_price=1000)

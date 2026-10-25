@@ -16,6 +16,7 @@
     --grid: #e9e7e1;
     --series-1: #2a78d6; /* 評価額 */
     --series-2: #eb6834; /* 元本 */
+    --series-3: #7c5cc4; /* 想定株価 */
     --good: #008300;
     --critical: #c62f2e;
   }
@@ -31,6 +32,7 @@
       --grid: #2a2a28;
       --series-1: #3987e5;
       --series-2: #d95926;
+      --series-3: #9d82e0;
       --good: #3fae3f;
       --critical: #e66767;
     }
@@ -46,6 +48,7 @@
     --grid: #2a2a28;
     --series-1: #3987e5;
     --series-2: #d95926;
+    --series-3: #9d82e0;
     --good: #3fae3f;
     --critical: #e66767;
   }
@@ -70,6 +73,15 @@
   .tile .v { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .tile .v.pos { color: var(--good); }
   .tile .v.neg { color: var(--critical); }
+  #lump { margin-bottom: 16px; }
+  #lump h2 { font-size: 16px; margin: 0 0 12px; }
+  #lump th { white-space: normal; text-align: right; vertical-align: bottom; }
+  #lump th:first-child, #lump td:first-child { text-align: left; white-space: nowrap; }
+  #lump td { vertical-align: top; padding: 10px 8px; }
+  #lump .v { font-size: 18px; font-weight: 600; }
+  #lump .v.pos { color: var(--good); }
+  #lump .v.neg { color: var(--critical); }
+  #lump .d { font-size: 12px; color: var(--text-muted); }
   .chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
   .chart-head h2 { font-size: 16px; margin: 0; }
   .legend { display: flex; gap: 16px; font-size: 13px; color: var(--text-secondary); }
@@ -89,6 +101,8 @@
   .rank p { font-size: 13px; color: var(--text-secondary); margin: 0 0 8px; }
   .rank th:nth-child(2), .rank td:nth-child(2) { text-align: left; }
   .rank tbody tr { cursor: pointer; }
+  .rank .code { margin-left: 8px; font-size: 12px; color: var(--text-muted); }
+  #rank td, #rank th { white-space: nowrap; }
   .rank tbody tr:hover, .rank tbody tr.sel { background: var(--surface-0); }
   .rank .chart-head label { flex-direction: row; align-items: center; gap: 8px; }
   #surges th:last-child, #surges td:last-child { text-align: left; color: var(--text-secondary); }
@@ -147,12 +161,19 @@
     <div class="card tile"><div class="k">元本に対する騰落率</div><div class="v" id="t-ret">—</div></div>
   </section>
 
+  <section class="card" id="lump" hidden aria-live="polite">
+    <h2>一括で投資した場合の利益</h2>
+    <div class="table-wrap"><table id="lump-table"></table></div>
+    <p class="src" id="lump-note"></p>
+  </section>
+
   <section class="card">
     <div class="chart-head">
       <h2 id="chart-title">資産推移</h2>
       <div class="legend">
         <span><i style="background:var(--series-1)"></i>評価額</span>
         <span><i style="background:var(--series-2)"></i>元本</span>
+        <span id="lg-price" hidden><i style="background:var(--series-3)"></i>想定株価（右目盛り）</span>
       </div>
     </div>
     <div class="chart-wrap"><canvas id="chart" aria-label="資産推移グラフ" role="img"></canvas></div>
@@ -165,11 +186,11 @@
 
   <section class="card rank">
     <h2>人気銘柄ランキング（前日比 +10% 以上の急騰記録）</h2>
-    <p>何度も・最近・大きく急騰した銘柄ほど人気スコアが高くなります（30日で重みが半分）。行をクリックすると、その銘柄でシミュレーションします。<span class="src" id="src"></span></p>
+    <p>急騰日が新しい銘柄から順に並べ、同じ日の中は人気スコア（何度も・最近・大きく急騰した銘柄ほど高い。30日で重みが半分）の高い順です。前日比・急騰日は直近の急騰のものです。行をクリックすると、その銘柄でシミュレーションします。<span class="src" id="src"></span></p>
     <div class="table-wrap"><table id="rank"></table></div>
   </section>
 
-  <p class="note">※ シミュレーション結果は将来の運用成果を保証するものではありません。税金・手数料は考慮していません。「急騰銘柄が年率を維持」は株価が一定の年率で上がり続けると仮定した計算で、急騰後の値動きを予測するものではありません。「サンプル銘柄」は動作確認用の架空データです。</p>
+  <p class="note">※ シミュレーション結果は将来の運用成果を保証するものではありません。税金・手数料は考慮していません。「急騰銘柄が年率を維持」は株価が一定の年率で上がり続けると仮定した計算で、急騰後の値動きを予測するものではありません。</p>
 </main>
 
 <script src="config.js"></script>
@@ -181,7 +202,7 @@ const yen = (v) => Math.round(v).toLocaleString("ja-JP") + " 円";
 const man = (v) => (v / 10000).toLocaleString("ja-JP", { maximumFractionDigits: 0 }) + "万";
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-let py, runSim, runHist, chart;
+let py, runSim, runHist, runLump, chart;
 const priceCache = {};
 const API = (window.SIM_API_BASE || "").replace(/\/$/, "");
 let tickers = [];   // DB（人気スコア順）または静的 JSON の銘柄一覧
@@ -252,13 +273,16 @@ function drawSurges() {
     const tr = document.createElement("tr");
     tr.dataset.ticker = t.ticker;
     const name = document.createElement("td");
-    if (t.report_url) {
-      const a = document.createElement("a");
-      a.href = t.report_url; a.target = "_blank"; a.rel = "noopener";
-      a.textContent = t.name;
-      a.addEventListener("click", e => e.stopPropagation());
-      name.append(a, `（${t.ticker}）`);
-    } else name.textContent = `${t.name}（${t.ticker}）`;
+    const a = document.createElement("a");
+    a.href = `https://finance.yahoo.co.jp/quote/${encodeURIComponent(t.ticker)}`;
+    a.target = "_blank"; a.rel = "noopener";
+    a.title = "Yahoo!ファイナンスで開く";
+    a.textContent = t.name;
+    a.addEventListener("click", e => e.stopPropagation());  // 行クリック（シミュレーション）と分ける
+    const code = document.createElement("span");
+    code.className = "code";
+    code.textContent = t.ticker;
+    name.append(a, code);
     const cells = [yen(t.close), `+${t.change_pct.toFixed(2)}%`, yen(t.prev_close), t.keywords || "—"].map(c => {
       const td = document.createElement("td");
       td.textContent = c;
@@ -280,22 +304,33 @@ function drawSurges() {
 
 function drawRanking() {
   const max = Math.max(...tickers.map(t => t.popularity_score || 0), 0);
-  const head = "<thead><tr><th>順位</th><th>銘柄</th><th>急騰記録</th><th>直近の前日比</th><th>最終記録日</th><th>人気スコア</th></tr></thead>";
+  const head = "<thead><tr><th>順位</th><th>銘柄名</th><th>急騰記録</th><th>前日比</th><th>急騰日</th><th>人気スコア</th></tr></thead>";
   const tbody = document.createElement("tbody");
   if (!tickers.some(t => t.hit_count)) {
     tbody.innerHTML = '<tr><td colspan="6">まだ急騰記録がありません（scripts/detect_surges.py を実行すると DB に蓄積されます）</td></tr>';
   }
-  tickers.filter(t => t.hit_count).forEach((t, i) => {
+  // 急騰日が新しい銘柄を優先し、同じ日の中は人気スコア順
+  const ranked = tickers.filter(t => t.hit_count).sort((a, b) =>
+    (b.last_hit_date || "").localeCompare(a.last_hit_date || "") || b.popularity_score - a.popularity_score);
+  ranked.forEach((t, i) => {
     const tr = document.createElement("tr");
     tr.dataset.ticker = t.ticker;
     const cells = [
-      i + 1, `${t.name}（${t.ticker}）`, `${t.hit_count} 回`,
-      t.last_change_pct != null ? `+${t.last_change_pct.toFixed(1)}%` : "—",
+      i + 1, null, `${t.hit_count} 回`,
+      t.last_change_pct != null ? `+${t.last_change_pct.toFixed(2)}%` : "—",
       t.last_hit_date || "—", null,
     ];
     cells.forEach((c, k) => {
       const td = document.createElement("td");
-      if (k === 5) {
+      if (k === 1) {
+        const code = document.createElement("span");
+        code.className = "code";
+        code.textContent = t.ticker;
+        td.append(t.name, code);
+      } else if (k === 3) {
+        td.className = "up";
+        td.textContent = c;
+      } else if (k === 5) {
         const bar = document.createElement("span");
         bar.className = "bar";
         bar.style.width = (max ? (t.popularity_score / max) * 60 : 0) + "px";
@@ -352,6 +387,13 @@ function drawChart(rows, labels) {
         backgroundColor: css("--series-2"), borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, tension: 0 },
     ],
   };
+  // 急騰モードは評価額がどの銘柄でも同じになるので、銘柄ごとに違う想定株価を右目盛りで重ねる
+  const withPrice = rows[0].price != null;
+  if (withPrice) {
+    data.datasets.push({ label: "想定株価", data: rows.map(r => r.price), yAxisID: "y2", borderColor: css("--series-3"),
+      backgroundColor: css("--series-3"), borderWidth: 2, borderDash: [6, 4], pointRadius: 0, pointHoverRadius: 5, tension: 0.15 });
+  }
+  $("lg-price").hidden = !withPrice;
   const grid = css("--grid"), muted = css("--text-muted");
   if (chart) chart.destroy();
   chart = new Chart($("chart"), {
@@ -373,6 +415,8 @@ function drawChart(rows, labels) {
              } } },
         y: { grid: { color: grid }, border: { display: false }, beginAtZero: true,
              ticks: { color: muted, callback: (v) => man(v) } },
+        y2: { display: withPrice, position: "right", grid: { display: false }, border: { display: false },
+              beginAtZero: true, ticks: { color: muted, callback: (v) => v.toLocaleString("ja-JP") + "円" } },
       },
     },
   });
@@ -391,6 +435,45 @@ function drawTable(rows, labels) {
       `<td>${yen(r.contributed)}</td><td>${yen(r.value)}</td><td>${yen(r.value - r.contributed)}</td></tr>`).join("") +
     "</tbody>";
 }
+
+// 急騰モードのみ：初期投資額を一括で入れた場合の利益（1日だけ / 年率を維持して保有）
+function drawLump(surge, initial, years, rate) {
+  $("lump").hidden = !surge;
+  if (!surge) return;
+  // 10 万円の場合は常に出し、初期投資額が入力されていればその金額の行を足す
+  const amounts = [LUMP_REFERENCE, ...(initial > 0 && initial !== LUMP_REFERENCE ? [initial] : [])];
+  const shares = (v) => v.toLocaleString("ja-JP", { maximumFractionDigits: 1 }) + " 株";
+  const cell = (res, detail) => {
+    const td = document.createElement("td");
+    const sign = res.profit >= 0 ? "+" : "";
+    const v = document.createElement("div");
+    v.className = "v " + (res.profit >= 0 ? "pos" : "neg");
+    v.textContent = `${sign}${yen(res.profit)}（${sign}${res.return_pct.toFixed(2)}%）`;
+    const d = document.createElement("div");
+    d.className = "d";
+    d.textContent = detail;
+    td.append(v, d);
+    return td;
+  };
+  const tbody = document.createElement("tbody");
+  amounts.forEach(amount => {
+    const r = runLump(amount, surge.prev_close, surge.close, years, rate).toJs({ dict_converter: Object.fromEntries });
+    const tr = document.createElement("tr");
+    const th = document.createElement("td");
+    th.textContent = yen(amount) + (amount === initial ? "（初期投資額）" : "");
+    tr.append(th,
+      cell(r.one_day, `${yen(r.one_day.buy_price)} で ${shares(r.one_day.units)} → 評価額 ${yen(r.one_day.value)}`),
+      cell(r.hold, `${yen(r.hold.buy_price)} で ${shares(r.hold.units)} → 評価額 ${yen(r.hold.value)}`));
+    tbody.append(tr);
+  });
+  $("lump-table").innerHTML = "<thead><tr><th>投資額</th>"
+    + `<th>1日だけ（前日終値 ${yen(surge.prev_close)} で買い → ${$("day").value} の終値 ${yen(surge.close)}）</th>`
+    + `<th>${years}年保有（終値 ${yen(surge.close)} で買い → 年率 ${(rate * 100).toFixed(1)}% で ${yen(surge.close * (1 + rate) ** years)}）</th>`
+    + "</tr></thead>";
+  $("lump-table").append(tbody);
+  $("lump-note").textContent = initial > 0 ? "" : "初期投資額（円）を入力すると、その金額の行も表示します。";
+}
+const LUMP_REFERENCE = 100000;  // 一括投資の目安として常に表示する金額
 
 async function update() {
   if (!runSim) return;
@@ -436,6 +519,7 @@ async function update() {
   $("t-profit").className = "v " + (s.profit >= 0 ? "pos" : "neg");
   $("t-ret").textContent = (s.return_pct >= 0 ? "+" : "") + s.return_pct.toFixed(1) + "%";
   $("t-ret").className = "v " + (s.return_pct >= 0 ? "pos" : "neg");
+  drawLump(surge, initial, years, rate);
 
   drawChart(rows, labels);
   drawTable(rows, labels);
@@ -448,6 +532,7 @@ async function main() {
   py.runPython(await (await fetch("sim.py")).text());
   runSim = py.globals.get("run");
   runHist = py.globals.get("historical_annual_rate");
+  runLump = py.globals.get("surge_lump_sums");
   $("status").textContent = "条件を変えると自動で再計算します。";
   ["mode", "ticker", "rate", "initial", "monthly", "years"].forEach(id => $(id).addEventListener("input", update));
   $("day").addEventListener("input", () => { shownMode = null; drawSurges(); update(); });

@@ -39,6 +39,32 @@ def simulate_from_price(start_price, initial, monthly, years, annual_rate=DEFAUL
     return rows
 
 
+def lump_sum(initial, buy_price, sell_price):
+    """initial 円を buy_price で一括購入し、sell_price で評価した場合の株数・評価額・利益を返す。"""
+    units = initial / buy_price
+    value = units * sell_price
+    return {
+        "buy_price": buy_price,
+        "sell_price": sell_price,
+        "units": units,
+        "value": value,
+        "profit": value - initial,
+        "return_pct": (sell_price / buy_price - 1) * 100,
+    }
+
+
+def surge_lump_sums(initial, prev_close, close, years, annual_rate=DEFAULT_ANNUAL_RATE):
+    """初期投資額だけを一括で入れた場合の 2 通りの利益を返す。
+
+    one_day: 前日終値で買い、急騰日の終値で評価（急騰 1 日分）
+    hold   : 急騰日の終値で買い、株価が年率 annual_rate を維持して years 年後に評価
+    """
+    return {
+        "one_day": lump_sum(initial, prev_close, close),
+        "hold": lump_sum(initial, close, close * (1 + annual_rate) ** years),
+    }
+
+
 def simulate_historical(prices, initial, monthly):
     """実際の月末終値で毎月同額を買い付けた（ドルコスト平均法）場合の推移を返す。
 
