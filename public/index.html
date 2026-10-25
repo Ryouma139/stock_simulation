@@ -93,6 +93,7 @@
   .rank .chart-head label { flex-direction: row; align-items: center; gap: 8px; }
   #surges th:last-child, #surges td:last-child { text-align: left; color: var(--text-secondary); }
   #surges td:last-child { font-size: 12px; min-width: 200px; }
+  #surges td:not(:first-child):not(:last-child), #surges th { white-space: nowrap; }
   #surges a { color: inherit; }
   .up { color: var(--good); }
   .bar { display: inline-block; height: 6px; border-radius: 0 3px 3px 0; background: var(--series-1); vertical-align: middle; margin-right: 6px; }

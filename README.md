@@ -13,6 +13,8 @@
 
 ## データの流れ（Notion → PostgreSQL）
 
+セットアップ手順・テーブルの詳細は [docs/notion-postgres-sync.md](docs/notion-postgres-sync.md) にまとめています。
+
 ```
 [Notion 📈 株価DB]  銘柄（→ 銘柄レポートページ）・急騰日・終値・前日終値・前日比率・キーワード
         │ Notion API（読み取りのみ）

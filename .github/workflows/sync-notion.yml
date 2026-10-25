@@ -7,13 +7,21 @@ on:
         description: "急騰日が直近何日の行を同期するか"
         type: number
         default: 7
-  # シークレットを設定したら有効化（平日 17:00 JST。株価DB の更新後に実行する）
-  # schedule:
-  #   - cron: "0 8 * * 1-5"
+  schedule:
+    # 平日 23:50 JST（cron は UTC なので 14:50。月〜金の JST 23:50 = 同じ曜日の UTC 14:50）
+    # GitHub の混雑状況により、数分〜数十分遅れて始まることがある
+    - cron: "50 14 * * 1-5"
+
+concurrency:
+  group: sync-notion  # 手動実行と定期実行が重なったら後の方を待たせる
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    env:
+      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,17 +30,14 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m unittest discover tests
       - name: Sync Notion 株価DB to PostgreSQL
-        env:
-          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python scripts/sync_notion.py --init-schema --days ${{ inputs.days || 7 }}
       - name: Export snapshot for the page
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python scripts/export_snapshot.py
+      # Cloudflare のシークレット（CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID）を登録するまではスキップする
       - name: Deploy to Cloudflare Pages
+        if: env.CLOUDFLARE_API_TOKEN != ''
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy public --project-name=stock-simulator
+          command: pages deploy public --project-name=stock-simulator --branch=main
