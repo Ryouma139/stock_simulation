@@ -1,0 +1,10 @@
+// 公開する画面の Worker（npx wrangler deploy でデプロイ）。誰でも見られる（ログインなし）
+// public/ の HTML・sim.py・JSON（export_snapshot.py が書き出した data/ を含む）をそのまま配るだけで、プログラムは動かさない
+// 管理画面は別の Worker（admin/wrangler.jsonc）
+{
+  "name": "stock-simulator",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./public"
+  }
+}

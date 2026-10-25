@@ -50,9 +50,10 @@ Notion の「📈 株価DB」に記録した **前日比 +10% 以上の急騰銘
         │ scripts/export_snapshot.py
         ▼
   public/data/surges.json + public/data/prices/*.json
-        │ （ローカル確認 or Cloudflare Pages にデプロイ）
+        │ wrangler deploy（ローカル確認 or Cloudflare Workers にデプロイ）
         ▼
-[画面] public/index.html + sim.py
+[画面] public/index.html + sim.py   https://stock-simulator.tryoma0227.workers.dev
+[管理画面] admin/                   https://stock-simulator-admin.tryoma0227.workers.dev（Access で保護）
 ```
 
 同期は **Notion → PostgreSQL の一方向**。Notion には書き込まない。
@@ -308,9 +309,51 @@ psql: docker exec -it stocksim-pg psql -U stocksim -d stocksim
 
 1. GitHub のリポジトリ → Settings → Secrets and variables → Actions に登録
    - `NOTION_TOKEN`、`DATABASE_URL`（Neon）
-   - デプロイする場合は `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`
+   - デプロイする場合は `CLOUDFLARE_API_TOKEN`（権限: Workers スクリプト：編集）、`CLOUDFLARE_ACCOUNT_ID`
 2. Actions タブから手動実行（直近何日ぶんを同期するか指定できる）
 3. 定期実行する場合は、ワークフローの `schedule`（平日 17:00 JST）のコメントを外す
+
+---
+
+## 11. 公開と管理画面（Cloudflare Workers）
+
+| Worker | URL | 中身 | 鍵 |
+|---|---|---|---|
+| `stock-simulator` | https://stock-simulator.tryoma0227.workers.dev | `public/` をそのまま配る（プログラム・シークレットなし） | なし |
+| `stock-simulator-admin` | https://stock-simulator-admin.tryoma0227.workers.dev | 管理画面（`admin/public/`）と API（`admin/src/`） | Cloudflare Access |
+
+Cloudflare Access は Worker 単位でしか保護できない（パス指定ができない）ため、管理画面を別の Worker に分けている。
+
+### 管理画面でできること
+
+- Neon の 4 テーブルの一覧と中身の表示（100 行ずつ・銘柄コードで絞り込み）
+- 急騰記録の手動追加（`source = 'manual'`。前日比 +10% 以上のみ。前日比は自動計算）
+- 手動追加した急騰記録の削除（Notion から同期した記録は削除不可。Notion 側で消す）
+- 公開画面への反映は、次の自動更新（平日 23:50）か GitHub Actions の手動実行のとき
+- 手動追加した銘柄の月次株価は、次の同期で Yahoo Finance から取得される
+
+### 保護の仕組み
+
+1. Cloudflare Access（Zero Trust → アクセス制御 → アプリケーション）
+   - 宛先: Workers ／ スコープ `stock-simulator-admin` ／ タイプ「Worker のプロダクション URL とプレビュー URL」
+   - ポリシー: 許可 ／ メール `tryoma0227@gmail.com` ／ ログイン方法: ワンタイム PIN
+2. API 側でも、Access が付ける署名付きトークン（`Cf-Access-Jwt-Assertion`）の署名・発行元・AUD・有効期限を確認する
+   （[admin/src/admin/auth.js](../admin/src/admin/auth.js)）。確認できなければ 401
+
+### 管理画面の Worker のシークレット
+
+```powershell
+npx wrangler secret put DATABASE_URL       -c admin/wrangler.jsonc   # Neon の接続 URL
+npx wrangler secret put ACCESS_TEAM_DOMAIN -c admin/wrangler.jsonc   # autumn-shape-c7ac.cloudflareaccess.com
+npx wrangler secret put ACCESS_AUD         -c admin/wrangler.jsonc   # Access アプリケーションの AUD タグ
+```
+
+Access のアプリケーションを作り直すと AUD タグが変わるので、`ACCESS_AUD` を登録し直す。
+
+### 手元での確認
+
+`admin/.dev.vars`（Git 管理外）に `DATABASE_URL=...` と `ALLOW_LOCAL_NO_AUTH=1` を書き、`npm run dev:admin` を実行する。
+`ALLOW_LOCAL_NO_AUTH` は localhost / 127.0.0.1 からのアクセスにだけ効く。**本物の Neon に書き込まれる** ので、試したら削除する。
 
 ---
 
@@ -327,6 +370,8 @@ psql: docker exec -it stocksim-pg psql -U stocksim -d stocksim
 | [db/schema_pg.sql](../db/schema_pg.sql) | PostgreSQL のスキーマ |
 | [public/index.html](../public/index.html) / [public/sim.py](../public/sim.py) | 画面 / シミュレーション計算 |
 | [tests/test_notion_sync.py](../tests/test_notion_sync.py) | 同期・書き出し・年率維持モードのテスト（`python -m unittest discover tests`） |
+| [wrangler.jsonc](../wrangler.jsonc) / [admin/wrangler.jsonc](../admin/wrangler.jsonc) | 公開画面 / 管理画面の Worker の設定 |
+| [admin/src/](../admin/src/) / [admin/public/index.html](../admin/public/index.html) | 管理画面の API / 画面 |
 | `.env` / [.env.example](../.env.example) | トークン・接続 URL（`.env` は Git 管理外） |
 
 ---
@@ -334,5 +379,5 @@ psql: docker exec -it stocksim-pg psql -U stocksim -d stocksim
 ## 10. 今後の課題
 
 - **月次株価の更新**: 保存済み銘柄の月次株価は取り直さないため、直近月の値が古くなる。同期のたびに直近数か月を取り直す処理を足すとよい
-- **Worker API**: 既存の Cloudflare Worker（[worker/](../worker/)）は D1 を読む作りのまま。画面は静的 JSON 経由で PostgreSQL のデータを表示している。リアルタイムに DB を読みたい場合は、Worker から PostgreSQL に接続する構成（Hyperdrive など）が必要
+- **旧 Worker API**: [worker/](../worker/)（D1 を読む Python Worker）は旧構成で、今は使っていない。画面は静的 JSON 経由で PostgreSQL のデータを表示している。リアルタイムに DB を読みたい場合は、Worker から PostgreSQL に接続する構成（Hyperdrive など）が必要
 - **シナリオ保存**: `scenarios` テーブルは未使用

@@ -59,6 +59,8 @@
   }
   main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 48px; }
   h1 { font-size: 22px; margin: 0 0 4px; }
+  .title-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .admin-link { font-size: 13px; color: var(--text-secondary); }
   .lead { color: var(--text-secondary); margin: 0 0 20px; font-size: 14px; }
   .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
   .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
@@ -117,7 +119,10 @@
 </head>
 <body>
 <main>
-  <h1>積立・リターン シミュレーター</h1>
+  <div class="title-row">
+    <h1>積立・リターン シミュレーター</h1>
+    <a class="admin-link" href="https://stock-simulator-admin.tryoma0227.workers.dev/">管理画面</a>
+  </div>
   <p class="lead">前日比 +10% 以上に急騰した銘柄が、その日の終値から想定年率（初期値 10%）を維持して上がり続けた場合の積立をシミュレーションします。想定年率だけの計算や、実際の過去株価での積立とも比較できます。計算はブラウザ内の Python（Pyodide）で実行します。</p>
 
   <section class="card rank" id="surge-card">

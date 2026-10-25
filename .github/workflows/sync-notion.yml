@@ -33,11 +33,26 @@ jobs:
         run: python scripts/sync_notion.py --init-schema --days ${{ inputs.days || 7 }}
       - name: Export snapshot for the page
         run: python scripts/export_snapshot.py
+      # 管理画面の API（admin/src/）が使う Neon のドライバー。wrangler がデプロイ時にまとめる
+      - uses: actions/setup-node@v4
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        with:
+          node-version: "22"
+      - run: npm ci
+        if: env.CLOUDFLARE_API_TOKEN != ''
       # Cloudflare のシークレット（CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID）を登録するまではスキップする
-      - name: Deploy to Cloudflare Pages
+      # 公開画面（wrangler.jsonc・public/）と管理画面（admin/wrangler.jsonc）の 2 つの Worker にデプロイする
+      - name: Deploy to Cloudflare Workers
         if: env.CLOUDFLARE_API_TOKEN != ''
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy public --project-name=stock-simulator --branch=main
+          command: deploy
+      - name: Deploy admin Worker
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy -c admin/wrangler.jsonc

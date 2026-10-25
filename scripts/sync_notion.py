@@ -234,10 +234,14 @@ def main():
     for r in sorted(ready, key=lambda r: (r["date"], -r["change_pct"])):
         print(f"  [同期] {r['date']} {r['ticker']} {r['name']} {r['close']:,.0f}円 +{r['change_pct']}%")
 
-    if new_tickers and not args.no_prices:
+    # 管理画面で手動追加した銘柄など、月次株価がまだ無い銘柄もここで取得する
+    missing = [r["ticker"] for r in db.query(
+        "SELECT ticker FROM tickers t WHERE NOT EXISTS (SELECT 1 FROM monthly_prices p WHERE p.ticker = t.ticker)")]
+    fetch_targets = sorted(set(new_tickers) | set(missing))
+    if fetch_targets and not args.no_prices:
         from fetch_prices import fetch_monthly
 
-        for t in new_tickers:
+        for t in fetch_targets:
             prices = fetch_monthly(t, args.years)
             save_monthly_prices(db, t, prices)
             print(f"  [新規] {t}: 月次株価 {len(prices)} ヶ月分を保存")

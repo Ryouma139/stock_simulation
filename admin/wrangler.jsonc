@@ -1,0 +1,15 @@
+// 管理画面の Worker（npx wrangler deploy -c admin/wrangler.jsonc でデプロイ）
+// Worker 全体を Cloudflare Access で保護する（Zero Trust のアプリケーションで、宛先の Workers に stock-simulator-admin を指定）
+// シークレットは `npx wrangler secret put <名前> -c admin/wrangler.jsonc` で登録する: DATABASE_URL / ACCESS_TEAM_DOMAIN / ACCESS_AUD
+{
+  "name": "stock-simulator-admin",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    // 管理画面の HTML
+    "directory": "./public",
+    // /api/* だけプログラム（src/worker.js）で処理し、それ以外はファイルをそのまま返す
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": { "enabled": true }
+}

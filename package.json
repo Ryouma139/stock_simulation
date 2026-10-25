@@ -1,0 +1,14 @@
+{
+  "name": "stock-simulation",
+  "private": true,
+  "description": "Cloudflare Workers：公開画面（public/・wrangler.jsonc）と管理画面（admin/・admin/wrangler.jsonc）。同期処理は scripts/（Python）",
+  "type": "module",
+  "scripts": {
+    "dev": "npx wrangler@4 dev --port 8788",
+    "dev:admin": "npx wrangler@4 dev -c admin/wrangler.jsonc --port 8789",
+    "deploy": "npx wrangler@4 deploy && npx wrangler@4 deploy -c admin/wrangler.jsonc"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "1.2.0"
+  }
+}

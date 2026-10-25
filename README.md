@@ -6,7 +6,10 @@
 - **想定年率モード**：一定の年率（初期値 **10%**）で毎月複利運用した場合
 - **過去株価モード**：実際の月末終値で毎月同じ金額を買い付けた場合（ドルコスト平均法）
 
-計算は **ブラウザ内の Python（Pyodide）** で行います。そのため Cloudflare Pages の静的ホスティングだけで動きます。
+計算は **ブラウザ内の Python（Pyodide）** で行います。そのため Cloudflare Workers の静的ファイル配信だけで動きます。
+
+- 公開画面: https://stock-simulator.tryoma0227.workers.dev （誰でも見られる）
+- 管理画面: https://stock-simulator-admin.tryoma0227.workers.dev （Cloudflare Access でログイン。Neon のテーブル表示と急騰記録の手動追加・削除）
 
 銘柄は **Notion の「株価DB」（急騰記録）を PostgreSQL に同期したもの** を参照します（D1 + `detect_surges.py` の自動検出も引き続き使えます）。
 同じ企業が何度も保存されるほど「人気スコア」が上がり、一覧やランキングで上位に表示されます。
@@ -32,9 +35,11 @@
         │ scripts/export_snapshot.py
         ▼
    public/data/surges.json ＋ public/data/prices/*.json
-        │ wrangler pages deploy
+        │ wrangler deploy（平日 23:50 に GitHub Actions から自動）
         ▼
-   [Cloudflare Pages: index.html + sim.py (Pyodide)]
+   [Cloudflare Workers]
+     ├─ stock-simulator        公開画面 index.html + sim.py (Pyodide)
+     └─ stock-simulator-admin  管理画面（Cloudflare Access で保護）→ Neon を読み書き
 ```
 
 > 「年率 10% を維持」した場合の評価額は、毎月の積立額と年率だけで決まるため **どの銘柄でも同じ** になります。
@@ -79,13 +84,19 @@
 
 ```
 stock_simulation/
-├─ public/                 ← Cloudflare Pages にデプロイ
+├─ wrangler.jsonc          公開画面の Worker（stock-simulator）の設定
+├─ public/                 ← 公開画面の Worker で配るファイル
 │  ├─ index.html           画面（Chart.js でグラフ・表を描画）
 │  ├─ sim.py               シミュレーションロジック（Python / 標準ライブラリのみ）
 │  └─ data/
 │     ├─ index.json        銘柄一覧
 │     └─ SAMPLE.json       動作確認用の架空データ（実績年率 10%）
 ├─ public/config.js        Worker API の URL（空なら静的サンプルで動作）
+├─ admin/                  管理画面の Worker（stock-simulator-admin）
+│  ├─ wrangler.jsonc       設定（シークレット: DATABASE_URL / ACCESS_TEAM_DOMAIN / ACCESS_AUD）
+│  ├─ public/index.html    管理画面
+│  └─ src/                 API（Cloudflare Access のログイン確認 → Neon）
+├─ package.json            Worker 用の依存（Neon のドライバー）と npm run dev / dev:admin / deploy
 ├─ scripts/
 │  ├─ detect_surges.py     +10% 急騰の検出 → D1 保存 → 人気スコア更新
 │  ├─ popularity.py        人気スコア（重み付け）の計算
@@ -97,7 +108,7 @@ stock_simulation/
 ├─ db/schema.sql           D1 / SQLite スキーマ（tickers / surge_events / monthly_prices / scenarios）
 ├─ db/schema_pg.sql        PostgreSQL スキーマ（列は schema.sql と同じ）
 ├─ tests/                  python -m unittest discover tests
-└─ worker/                 D1 を読む Python Worker API
+└─ worker/                 D1 を読む Python Worker API（旧構成。今は使っていない）
 ```
 
 ## ローカルで動かす
@@ -126,7 +137,7 @@ python scripts/export_snapshot.py                   # 画面用の JSON を publ
 cd public && python -m http.server 8000             # 確認
 ```
 
-GitHub Actions の `.github/workflows/sync-notion.yml` では、同期 → 書き出し → Pages へのデプロイをまとめて行います。
+GitHub Actions の `.github/workflows/sync-notion.yml` では、平日 23:50（JST）に同期 → 書き出し → Workers へのデプロイをまとめて行います。
 シークレット `NOTION_TOKEN`・`DATABASE_URL`・`CLOUDFLARE_API_TOKEN`・`CLOUDFLARE_ACCOUNT_ID` を登録してください。
 
 PostgreSQL での保存を確認するテスト（空の DB を指定）:
@@ -154,14 +165,18 @@ pip install -r requirements.txt
 python scripts/fetch_prices.py 7203.T 6758.T ^N225 --years 20
 ```
 
-## デプロイ（Cloudflare Pages）
+## デプロイ（Cloudflare Workers）
 
 ```bash
-npx wrangler pages deploy public --project-name=stock-simulator
+npm ci
+npm run deploy      # 公開画面（stock-simulator）と管理画面（stock-simulator-admin）の両方
+npm run dev         # 公開画面を手元で確認      http://127.0.0.1:8788
+npm run dev:admin   # 管理画面を手元で確認      http://127.0.0.1:8789（admin/.dev.vars が必要）
 ```
 
-`.github/workflows/deploy.yml` を使うと、株価の取得からデプロイまでを自動化できます。
-リポジトリに `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` をシークレットとして登録し、手動で実行するか `schedule` を有効にしてください。
+API トークンには「Workers スクリプト：編集」の権限が必要です。管理画面の設定（Cloudflare Access・シークレット）は
+[docs/notion-postgres-sync.md](docs/notion-postgres-sync.md) の「管理画面」を参照してください。
+`.github/workflows/deploy.yml` は旧構成（Cloudflare Pages）用です。
 
 ## DB の選び方
 

@@ -6,3 +6,6 @@ __pycache__/
 # export_snapshot.py の出力（CI で DB から生成してデプロイする）
 public/data/surges.json
 public/data/prices/
+node_modules/
+# wrangler pages dev 用のローカル変数（DATABASE_URL など）
+.dev.vars

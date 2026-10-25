@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>管理画面</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f4f3ef;
+    --surface-1: #fcfcfb;
+    --border: #e2e0da;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #7a7974;
+    --accent: #2a78d6;
+    --good: #008300;
+    --critical: #c62f2e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-0: #111110;
+      --surface-1: #1a1a19;
+      --border: #2e2e2c;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #8f8e86;
+      --accent: #3987e5;
+      --good: #3fae3f;
+      --critical: #e66767;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #111110;
+    --surface-1: #1a1a19;
+    --border: #2e2e2c;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8f8e86;
+    --accent: #3987e5;
+    --good: #3fae3f;
+    --critical: #e66767;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--surface-0); color: var(--text-primary);
+    font: 15px/1.6 system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  a { color: var(--accent); }
+  .muted { color: var(--text-muted); font-size: 13px; }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tabs button {
+    font: inherit; font-size: 14px; padding: 8px 12px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface-0); color: var(--text-primary);
+  }
+  .tabs button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .tabs b { font-variant-numeric: tabular-nums; margin-left: 6px; color: var(--text-secondary); font-weight: 500; }
+  form.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: end; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+  label.wide { grid-column: 1 / -1; }
+  input, button.primary {
+    font: inherit; font-size: 15px; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-0); color: var(--text-primary);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; cursor: pointer; font-weight: 600; }
+  button.primary:disabled { opacity: .5; cursor: default; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0 8px; }
+  .toolbar input { width: 160px; }
+  .toolbar button, td button {
+    font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface-0); color: var(--text-primary);
+  }
+  td button.danger { color: var(--critical); border-color: var(--critical); }
+  .table-wrap { overflow: auto; max-height: 560px; border: 1px solid var(--border); border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+  td.num { text-align: right; }
+  td.long { white-space: normal; min-width: 240px; color: var(--text-secondary); }
+  th { position: sticky; top: 0; background: var(--surface-1); color: var(--text-secondary); font-weight: 500; }
+  .msg { font-size: 14px; margin: 8px 0 0; }
+  .msg.ok { color: var(--good); }
+  .msg.err { color: var(--critical); }
+  .pct { font-weight: 600; }
+  .pct.ok { color: var(--good); }
+  .pct.ng { color: var(--critical); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>管理画面</h1>
+    <span class="muted"><span id="user"></span> ／ <a href="https://stock-simulator.tryoma0227.workers.dev/">シミュレーターに戻る</a></span>
+  </header>
+
+  <p class="msg err" id="fatal" hidden></p>
+
+  <section class="card">
+    <h2>急騰記録を手動で追加</h2>
+    <p class="muted">Notion の株価DB に無い急騰を登録します（前日比 +10% 以上のみ）。公開画面には次の自動更新（平日 23:50）か、GitHub Actions の手動実行で反映されます。</p>
+    <form class="grid" id="add">
+      <label>銘柄コード<input name="ticker" placeholder="4398.T" required pattern="\d{3}[0-9A-Za-z]\.[Tt]" autocomplete="off"></label>
+      <label>銘柄名<input name="name" placeholder="ブロードバンドセキュリティ" required maxlength="100"></label>
+      <label>急騰日<input name="date" type="date" required></label>
+      <label>前日終値（円）<input name="prev_close" type="number" step="any" min="0" required></label>
+      <label>終値（円）<input name="close" type="number" step="any" min="0" required></label>
+      <label>前日比<span class="pct" id="pct">—</span></label>
+      <label class="wide">キーワード（任意・カンマ区切り）<input name="keywords" placeholder="SOC運用, 情報漏えい対策"></label>
+      <div><button class="primary" type="submit" id="add-btn">追加する</button></div>
+    </form>
+    <p class="msg" id="add-msg" hidden></p>
+  </section>
+
+  <section class="card">
+    <h2>Neon のテーブル</h2>
+    <div class="tabs" id="tabs"></div>
+    <div class="toolbar">
+      <input id="filter" placeholder="銘柄コードで絞り込み" autocomplete="off">
+      <button type="button" id="filter-btn">絞り込む</button>
+      <button type="button" id="prev">← 前へ</button>
+      <button type="button" id="next">次へ →</button>
+      <span class="muted" id="range"></span>
+    </div>
+    <div class="table-wrap"><table id="rows"></table></div>
+    <p class="muted" id="rows-note"></p>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const API = "api/admin";
+const PAGE = 100;
+const state = { table: "surge_events", offset: 0, total: 0, ticker: "" };
+const NUMERIC = new Set(["prev_close", "close", "change_pct", "hit_count", "popularity_score", "annual_rate",
+                         "initial", "monthly", "years", "final_value", "id"]);
+const LONG = new Set(["keywords", "report_url", "notion_page_id"]);
+
+async function api(path, opts) {
+  const res = await fetch(`${API}/${path}`, { credentials: "same-origin", ...opts });
+  const body = await res.json().catch(() => ({}));
+  if (res.status === 401) throw new Error("ログインが必要です。Cloudflare Access の設定を確認してください（" + (body.detail || "") + "）");
+  if (!res.ok) throw new Error(body.error || `エラー（${res.status}）`);
+  return body;
+}
+
+function showFatal(e) {
+  $("fatal").textContent = e.message;
+  $("fatal").hidden = false;
+}
+
+async function loadTables() {
+  const { user, tables } = await api("tables");
+  $("user").textContent = user ? `ログイン中: ${user}` : "";
+  $("tabs").replaceChildren(...tables.map(t => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("aria-pressed", t.name === state.table);
+    b.append(`${t.label}（${t.name}）`);
+    const n = document.createElement("b");
+    n.textContent = t.rows.toLocaleString("ja-JP") + " 行";
+    b.append(n);
+    b.addEventListener("click", () => { state.table = t.name; state.offset = 0; loadTables().then(loadRows).catch(showFatal); });
+    return b;
+  }));
+}
+
+async function loadRows() {
+  const q = new URLSearchParams({ table: state.table, limit: PAGE, offset: state.offset });
+  if (state.ticker) q.set("ticker", state.ticker);
+  const { rows, total } = await api(`rows?${q}`);
+  state.total = total;
+  const cols = rows.length ? Object.keys(rows[0]) : [];
+  const deletable = state.table === "surge_events";
+  const thead = "<thead><tr>" + (deletable ? "<th>操作</th>" : "") + cols.map(c => `<th>${c}</th>`).join("") + "</tr></thead>";
+  const tbody = document.createElement("tbody");
+  rows.forEach(r => {
+    const tr = document.createElement("tr");
+    cols.forEach(c => {
+      const td = document.createElement("td");
+      const v = r[c];
+      td.textContent = v == null ? "—" : typeof v === "number" ? v.toLocaleString("ja-JP", { maximumFractionDigits: 4 }) : String(v);
+      if (NUMERIC.has(c)) td.className = "num";
+      if (LONG.has(c)) td.className = "long";
+      tr.append(td);
+    });
+    if (deletable) {
+      const td = document.createElement("td");
+      if (r.source === "manual") {
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "danger"; b.textContent = "削除";
+        b.addEventListener("click", () => removeSurge(r));
+        td.append(b);
+      } else td.textContent = "—";
+      tr.prepend(td);  // 横に長いので、操作ボタンは左端に置く
+    }
+    tbody.append(tr);
+  });
+  $("rows").innerHTML = rows.length ? thead : "<tbody><tr><td>行がありません</td></tr></tbody>";
+  if (rows.length) $("rows").append(tbody);
+  const end = Math.min(state.offset + rows.length, total);
+  $("range").textContent = total ? `${(state.offset + 1).toLocaleString()}〜${end.toLocaleString()} 行目 ／ 全 ${total.toLocaleString()} 行` : "";
+  $("prev").disabled = state.offset === 0;
+  $("next").disabled = end >= total;
+  $("rows-note").textContent = deletable
+    ? "削除できるのは手動で追加した記録（source = manual）だけです。Notion から同期した記録は、Notion 側で消してください。"
+    : "このテーブルは表示のみです。";
+}
+
+async function removeSurge(r) {
+  if (!confirm(`${r.ticker} の ${r.date} の急騰記録を削除しますか？`)) return;
+  try {
+    await api(`surges?${new URLSearchParams({ ticker: r.ticker, date: r.date })}`, { method: "DELETE" });
+    await loadTables(); await loadRows();
+  } catch (e) { alert(e.message); }
+}
+
+function updatePct() {
+  const f = $("add");
+  const prev = Number(f.prev_close.value), close = Number(f.close.value);
+  if (!(prev > 0 && close > 0)) { $("pct").textContent = "—"; $("pct").className = "pct"; return; }
+  const pct = (close / prev - 1) * 100;
+  $("pct").textContent = (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%" + (pct < 10 ? "（+10% 未満は登録不可）" : "");
+  $("pct").className = "pct " + (pct >= 10 ? "ok" : "ng");
+}
+
+$("add").addEventListener("input", updatePct);
+$("add").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target, msg = $("add-msg");
+  const body = Object.fromEntries(new FormData(f));
+  $("add-btn").disabled = true;
+  try {
+    const r = await api("surges", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    msg.textContent = `${r.ticker} の ${r.date}（+${r.change_pct}%）を追加しました。`;
+    msg.className = "msg ok";
+    f.reset(); setToday(); updatePct();
+    state.table = "surge_events"; state.offset = 0;
+    await loadTables(); await loadRows();
+  } catch (err) {
+    msg.textContent = err.message;
+    msg.className = "msg err";
+  } finally {
+    msg.hidden = false;
+    $("add-btn").disabled = false;
+  }
+});
+
+$("filter-btn").addEventListener("click", () => { state.ticker = $("filter").value.trim().toUpperCase(); state.offset = 0; loadRows().catch(showFatal); });
+$("filter").addEventListener("keydown", (e) => { if (e.key === "Enter") $("filter-btn").click(); });
+$("prev").addEventListener("click", () => { state.offset = Math.max(0, state.offset - PAGE); loadRows().catch(showFatal); });
+$("next").addEventListener("click", () => { state.offset += PAGE; loadRows().catch(showFatal); });
+
+function setToday() {  // 急騰日の初期値は日本時間の今日
+  $("add").date.value = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+}
+
+setToday();
+loadTables().then(loadRows).catch(showFatal);
+</script>
+</body>
+</html>
