@@ -48,6 +48,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.152.0"  # 静的ファイルだけの Worker（main なし）は wrangler 4 が必要
           command: deploy
       - name: Deploy admin Worker
         if: env.CLOUDFLARE_API_TOKEN != ''
@@ -55,4 +56,5 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.152.0"  # 静的ファイルだけの Worker（main なし）は wrangler 4 が必要
           command: deploy -c admin/wrangler.jsonc
