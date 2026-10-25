@@ -20,6 +20,25 @@ def simulate_fixed(initial, monthly, years, annual_rate=DEFAULT_ANNUAL_RATE):
     return rows
 
 
+def simulate_from_price(start_price, initial, monthly, years, annual_rate=DEFAULT_ANNUAL_RATE):
+    """急騰日の終値を起点に、株価が年率 annual_rate を維持して上がり続けた場合の推移を返す。
+
+    初月に initial、以降は毎月 monthly をその時点の株価で買い付ける。
+    評価額は simulate_fixed と同じになり、加えて各月の想定株価（price）と保有株数（units）を返す。
+    """
+    monthly_growth = (1 + annual_rate) ** (1 / 12)
+    price = float(start_price)
+    units = initial / price
+    contributed = float(initial)
+    rows = [{"month": 0, "price": price, "units": units, "contributed": contributed, "value": units * price}]
+    for m in range(1, int(years * 12) + 1):
+        price *= monthly_growth
+        units += monthly / price
+        contributed += monthly
+        rows.append({"month": m, "price": price, "units": units, "contributed": contributed, "value": units * price})
+    return rows
+
+
 def simulate_historical(prices, initial, monthly):
     """実際の月末終値で毎月同額を買い付けた（ドルコスト平均法）場合の推移を返す。
 
@@ -61,10 +80,12 @@ def historical_annual_rate(prices):
     return (prices[-1]["close"] / prices[0]["close"]) ** (1 / years) - 1
 
 
-def run(mode, initial, monthly, years, annual_rate, prices=None):
+def run(mode, initial, monthly, years, annual_rate, prices=None, start_price=None):
     """JS から呼ぶエントリポイント。"""
     if mode == "historical" and prices:
         rows = simulate_historical(prices, initial, monthly)
+    elif mode == "surge" and start_price:
+        rows = simulate_from_price(start_price, initial, monthly, years, annual_rate)
     else:
         rows = simulate_fixed(initial, monthly, years, annual_rate)
     return {"rows": rows, "summary": summarize(rows)}
@@ -73,3 +94,5 @@ def run(mode, initial, monthly, years, annual_rate, prices=None):
 if __name__ == "__main__":
     s = run("fixed", 0, 30000, 20, DEFAULT_ANNUAL_RATE)["summary"]
     print(f"毎月3万円・年率10%・20年: 元本 {s['contributed']:,.0f} 円 → 評価額 {s['final_value']:,.0f} 円")
+    last = run("surge", 0, 30000, 20, DEFAULT_ANNUAL_RATE, start_price=2958)["rows"][-1]
+    print(f"急騰日の終値 2,958 円が年率10%を維持: 20年後の株価 {last['price']:,.0f} 円・保有 {last['units']:,.1f} 株")

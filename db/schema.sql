@@ -20,9 +20,14 @@ CREATE TABLE IF NOT EXISTS surge_events (
   prev_close REAL NOT NULL,
   close      REAL NOT NULL,
   change_pct REAL NOT NULL,                 -- 前日比（%）
+  source     TEXT NOT NULL DEFAULT 'yfinance', -- 'notion'（株価DB から同期）/ 'yfinance'
+  notion_page_id TEXT,                      -- 株価DB の行（ページ）ID
+  report_url TEXT,                          -- 銘柄レポートページの URL
+  keywords   TEXT,
   PRIMARY KEY (ticker, date)                -- 同じ日を二重に記録しない
 );
 CREATE INDEX IF NOT EXISTS idx_surge_date ON surge_events(date DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_surge_notion_page ON surge_events(notion_page_id);
 
 -- 月次終値（シミュレーターの過去株価モードで使う）
 CREATE TABLE IF NOT EXISTS monthly_prices (
@@ -36,7 +41,7 @@ CREATE TABLE IF NOT EXISTS monthly_prices (
 CREATE TABLE IF NOT EXISTS scenarios (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   title       TEXT NOT NULL,
-  mode        TEXT NOT NULL CHECK (mode IN ('fixed', 'historical')),
+  mode        TEXT NOT NULL CHECK (mode IN ('fixed', 'historical', 'surge')),
   ticker      TEXT,
   annual_rate REAL NOT NULL DEFAULT 0.10,   -- 想定年率 10%
   initial     INTEGER NOT NULL DEFAULT 0,

@@ -1,7 +1,11 @@
-"""D1（本番）とローカル SQLite（開発・テスト）を同じ書き方で扱うための薄いクライアント。
+"""PostgreSQL / D1 / ローカル SQLite を同じ書き方で扱うための薄いクライアント。
 
-- D1Client    : Cloudflare D1 の REST API を呼ぶ（GitHub Actions などサーバー外から書き込む用）
-- SqliteClient: ローカルの SQLite ファイル。スキーマ・SQL は D1 と共通
+- PostgresClient: Neon / Supabase などの PostgreSQL（環境変数 DATABASE_URL）
+- D1Client      : Cloudflare D1 の REST API を呼ぶ（GitHub Actions などサーバー外から書き込む用）
+- SqliteClient  : ローカルの SQLite ファイル。スキーマ・SQL は D1 と共通
+
+SQL のプレースホルダはどれも "?" で書く（PostgresClient が "%s" に読み替える）。
+接続情報やトークンは、環境変数かプロジェクト直下の .env（.env.example を参照）に書く。
 """
 import os
 import sqlite3
@@ -9,8 +13,23 @@ from pathlib import Path
 
 import requests
 
-SCHEMA_PATH = Path(__file__).resolve().parent.parent / "db" / "schema.sql"
+ROOT = Path(__file__).resolve().parent.parent
+SCHEMA_PATH = ROOT / "db" / "schema.sql"
+PG_SCHEMA_PATH = SCHEMA_PATH.with_name("schema_pg.sql")
 D1_MAX_PARAMS = 100  # D1 は 1 クエリあたりのバインド数が 100 まで
+
+
+def load_dotenv(path=ROOT / ".env"):
+    """KEY=VALUE 形式の .env を環境変数に読み込む。すでに設定されている環境変数は上書きしない。"""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        key, sep, value = line.strip().partition("=")
+        if sep and key and not key.startswith("#"):
+            os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
+
+load_dotenv()  # このモジュールを読み込むスクリプト（同期・書き出し・急騰検出）すべてで有効になる
 
 
 class SqliteClient:
@@ -26,6 +45,23 @@ class SqliteClient:
 
     def init_schema(self):
         self.conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+
+
+class PostgresClient:
+    def __init__(self, url):
+        import psycopg
+        from psycopg.rows import dict_row
+
+        self.conn = psycopg.connect(url, row_factory=dict_row, autocommit=True)
+
+    def query(self, sql, params=()):
+        # SQL 中に "?" や "%" の文字リテラルは書かない前提（LIKE などが必要になったら見直す）
+        with self.conn.cursor() as cur:
+            cur.execute(sql.replace("?", "%s"), list(params) or None)
+            return cur.fetchall() if cur.description else []
+
+    def init_schema(self):
+        self.conn.execute(PG_SCHEMA_PATH.read_text(encoding="utf-8"))
 
 
 class D1Client:
@@ -68,12 +104,14 @@ def insert_many(db, head_sql, rows, tail_sql=""):
 
 
 def connect(sqlite_path=None):
-    """引数に SQLite のパスがあればローカル、なければ環境変数から D1 に接続する。"""
+    """接続先を選ぶ。優先順: 引数の SQLite パス → 環境変数 DATABASE_URL（PostgreSQL）→ D1。"""
     if sqlite_path:
         return SqliteClient(sqlite_path)
+    if os.environ.get("DATABASE_URL"):
+        return PostgresClient(os.environ["DATABASE_URL"])
     missing = [k for k in ("CLOUDFLARE_ACCOUNT_ID", "D1_DATABASE_ID", "CLOUDFLARE_API_TOKEN") if not os.environ.get(k)]
     if missing:
-        raise SystemExit(f"D1 に接続するには環境変数 {', '.join(missing)} が必要です（ローカルなら --sqlite を指定）")
+        raise SystemExit(f"PostgreSQL なら DATABASE_URL、D1 なら {', '.join(missing)} を環境変数に設定してください（ローカルなら --sqlite）")
     return D1Client(
         os.environ["CLOUDFLARE_ACCOUNT_ID"],
         os.environ["D1_DATABASE_ID"],

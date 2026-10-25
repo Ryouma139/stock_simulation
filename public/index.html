@@ -84,11 +84,17 @@
   th:first-child, td:first-child { text-align: left; }
   th { position: sticky; top: 0; background: var(--surface-1); color: var(--text-secondary); font-weight: 500; }
   .rank { margin-top: 16px; }
+  #surge-card { margin: 0 0 16px; }
   .rank h2 { font-size: 16px; margin: 0 0 4px; }
   .rank p { font-size: 13px; color: var(--text-secondary); margin: 0 0 8px; }
   .rank th:nth-child(2), .rank td:nth-child(2) { text-align: left; }
   .rank tbody tr { cursor: pointer; }
   .rank tbody tr:hover, .rank tbody tr.sel { background: var(--surface-0); }
+  .rank .chart-head label { flex-direction: row; align-items: center; gap: 8px; }
+  #surges th:last-child, #surges td:last-child { text-align: left; color: var(--text-secondary); }
+  #surges td:last-child { font-size: 12px; min-width: 200px; }
+  #surges a { color: inherit; }
+  .up { color: var(--good); }
   .bar { display: inline-block; height: 6px; border-radius: 0 3px 3px 0; background: var(--series-1); vertical-align: middle; margin-right: 6px; }
   .src { font-size: 12px; color: var(--text-muted); }
   .note { font-size: 12px; color: var(--text-muted); margin-top: 16px; }
@@ -97,11 +103,21 @@
 <body>
 <main>
   <h1>積立・リターン シミュレーター</h1>
-  <p class="lead">想定年率（初期値 10%）で運用した場合と、銘柄の実際の株価で毎月積み立てた場合を比較できます。計算はブラウザ内の Python（Pyodide）で実行します。</p>
+  <p class="lead">前日比 +10% 以上に急騰した銘柄が、その日の終値から想定年率（初期値 10%）を維持して上がり続けた場合の積立をシミュレーションします。想定年率だけの計算や、実際の過去株価での積立とも比較できます。計算はブラウザ内の Python（Pyodide）で実行します。</p>
+
+  <section class="card rank" id="surge-card">
+    <div class="chart-head">
+      <h2>前日比 +10% 以上の急騰銘柄</h2>
+      <label>急騰日 <select id="day"></select></label>
+    </div>
+    <p>Notion の株価DB から PostgreSQL に同期した急騰記録です。行をクリックすると、急騰日の終値から株価が想定年率を維持した場合でシミュレーションします。</p>
+    <div class="table-wrap"><table id="surges"></table></div>
+  </section>
 
   <section class="card controls" aria-label="条件">
     <label>モード
       <select id="mode">
+        <option value="surge">急騰銘柄が年率を維持</option>
         <option value="fixed">想定年率で計算</option>
         <option value="historical">銘柄の過去株価で計算</option>
       </select>
@@ -152,7 +168,7 @@
     <div class="table-wrap"><table id="rank"></table></div>
   </section>
 
-  <p class="note">※ シミュレーション結果は将来の運用成果を保証するものではありません。税金・手数料は考慮していません。「サンプル銘柄」は動作確認用の架空データです。</p>
+  <p class="note">※ シミュレーション結果は将来の運用成果を保証するものではありません。税金・手数料は考慮していません。「急騰銘柄が年率を維持」は株価が一定の年率で上がり続けると仮定した計算で、急騰後の値動きを予測するものではありません。「サンプル銘柄」は動作確認用の架空データです。</p>
 </main>
 
 <script src="config.js"></script>
@@ -168,7 +184,17 @@ let py, runSim, runHist, chart;
 const priceCache = {};
 const API = (window.SIM_API_BASE || "").replace(/\/$/, "");
 let tickers = [];   // DB（人気スコア順）または静的 JSON の銘柄一覧
+let surgeDays = []; // [{date, items: [{ticker, name, close, prev_close, change_pct, keywords, report_url}]}] 新しい順
 let useApi = false;
+let shownMode = null;
+
+// surges.json（PostgreSQL から scripts/export_snapshot.py で書き出したもの）。無ければ null
+async function loadSnapshot() {
+  try {
+    const res = await fetch("data/surges.json");
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
+}
 
 // 銘柄一覧を DB（Worker API）から人気順に取得。API 未設定・失敗時は静的 JSON を使う
 async function loadTickers() {
@@ -180,17 +206,75 @@ async function loadTickers() {
       useApi = tickers.length > 0;
     } catch (e) { console.warn("API から銘柄を取得できませんでした。静的データを使います", e); }
   }
-  if (!useApi) tickers = await (await fetch("data/index.json")).json();
-  $("src").textContent = useApi ? "（データ: D1）" : "（データ: 静的サンプル）";
+  const snap = useApi ? null : await loadSnapshot();
+  if (snap) {
+    tickers = snap.tickers;
+    surgeDays = snap.days;
+  } else if (!useApi) {
+    tickers = await (await fetch("data/index.json")).json();
+  }
+  $("src").textContent = useApi ? "（データ: D1）" : snap ? "（データ: PostgreSQL）" : "（データ: 静的サンプル）";
 
-  const sel = $("ticker");
-  sel.replaceChildren(...tickers.map(t => {
-    const o = document.createElement("option");
-    o.value = t.ticker;
-    o.textContent = t.hit_count ? `${t.name}（${t.ticker}）★${t.hit_count}` : `${t.name}（${t.ticker}）`;
-    return o;
-  }));
+  if (surgeDays.length) {
+    $("day").replaceChildren(...surgeDays.map(d => new Option(`${d.date}（${d.items.length} 銘柄）`, d.date)));
+  } else {
+    $("surge-card").hidden = true;
+    $("mode").querySelector('option[value="surge"]').remove();
+  }
+  $("mode").value = surgeDays.length ? "surge" : "fixed";
+  if (!tickers.some(t => t.file || useApi)) $("mode").querySelector('option[value="historical"]').remove();
+  fillTickerSelect();
+  drawSurges();
   drawRanking();
+}
+
+const surgeItems = () => surgeDays.find(d => d.date === $("day").value)?.items || [];
+
+// 銘柄の選択肢：急騰モードは選択中の急騰日の銘柄、それ以外は月次株価のある銘柄
+function fillTickerSelect() {
+  const mode = $("mode").value;
+  if (mode === shownMode) return;
+  shownMode = mode;
+  const prev = $("ticker").value;
+  const opts = mode === "surge"
+    ? surgeItems().map(t => new Option(`${t.name}（${t.ticker}）+${t.change_pct.toFixed(1)}%`, t.ticker))
+    : tickers.filter(t => t.file || useApi).map(t =>
+        new Option(t.hit_count ? `${t.name}（${t.ticker}）★${t.hit_count}` : `${t.name}（${t.ticker}）`, t.ticker));
+  $("ticker").replaceChildren(...opts);
+  if (opts.some(o => o.value === prev)) $("ticker").value = prev;
+}
+
+function drawSurges() {
+  const head = "<thead><tr><th>銘柄</th><th>終値</th><th>前日比</th><th>前日終値</th><th>キーワード</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  surgeItems().forEach(t => {
+    const tr = document.createElement("tr");
+    tr.dataset.ticker = t.ticker;
+    const name = document.createElement("td");
+    if (t.report_url) {
+      const a = document.createElement("a");
+      a.href = t.report_url; a.target = "_blank"; a.rel = "noopener";
+      a.textContent = t.name;
+      a.addEventListener("click", e => e.stopPropagation());
+      name.append(a, `（${t.ticker}）`);
+    } else name.textContent = `${t.name}（${t.ticker}）`;
+    const cells = [yen(t.close), `+${t.change_pct.toFixed(2)}%`, yen(t.prev_close), t.keywords || "—"].map(c => {
+      const td = document.createElement("td");
+      td.textContent = c;
+      return td;
+    });
+    cells[1].className = "up";
+    tr.append(name, ...cells);
+    tr.addEventListener("click", () => {
+      $("mode").value = "surge";
+      fillTickerSelect();
+      $("ticker").value = t.ticker;
+      update();
+    });
+    tbody.append(tr);
+  });
+  $("surges").innerHTML = head;
+  $("surges").append(tbody);
 }
 
 function drawRanking() {
@@ -219,7 +303,16 @@ function drawRanking() {
       tr.append(td);
     });
     tr.addEventListener("click", () => {
-      $("mode").value = "historical";
+      // 月次株価があれば過去株価モード、無ければその銘柄の直近の急騰日で急騰モードにする
+      const day = surgeDays.find(d => d.items.some(x => x.ticker === t.ticker));
+      if (!t.file && !useApi && !day) return;
+      $("mode").value = t.file || useApi ? "historical" : "surge";
+      if ($("mode").value === "surge" && day.date !== $("day").value) {
+        $("day").value = day.date;
+        shownMode = null;
+        drawSurges();
+      }
+      fillTickerSelect();
       $("ticker").value = t.ticker;
       update();
     });
@@ -242,10 +335,10 @@ async function loadPrices(ticker) {
 }
 
 function syncInputs() {
-  const hist = $("mode").value === "historical";
-  $("rate").disabled = hist;
-  $("years").disabled = hist;
-  $("ticker").disabled = !hist;
+  const mode = $("mode").value;
+  $("rate").disabled = mode === "historical";
+  $("years").disabled = mode === "historical";
+  $("ticker").disabled = mode === "fixed";
 }
 
 function drawChart(rows, labels) {
@@ -287,25 +380,35 @@ function drawChart(rows, labels) {
 function drawTable(rows, labels) {
   const yearly = rows.filter((_, i) => i % 12 === 0 || i === rows.length - 1);
   const idx = rows.map((_, i) => i).filter(i => i % 12 === 0 || i === rows.length - 1);
+  const withPrice = rows[0].price != null;  // 急騰モードは想定株価と保有株数も出す
+  const shares = (v) => v.toLocaleString("ja-JP", { maximumFractionDigits: 1 }) + " 株";
   $("table").innerHTML =
-    "<thead><tr><th>時点</th><th>元本</th><th>評価額</th><th>損益</th></tr></thead><tbody>" +
-    yearly.map((r, k) => `<tr><td>${labels[idx[k]]}</td><td>${yen(r.contributed)}</td><td>${yen(r.value)}</td><td>${yen(r.value - r.contributed)}</td></tr>`).join("") +
+    "<thead><tr><th>時点</th>" + (withPrice ? "<th>想定株価</th><th>保有株数</th>" : "") +
+    "<th>元本</th><th>評価額</th><th>損益</th></tr></thead><tbody>" +
+    yearly.map((r, k) => `<tr><td>${labels[idx[k]]}</td>` +
+      (withPrice ? `<td>${yen(r.price)}</td><td>${shares(r.units)}</td>` : "") +
+      `<td>${yen(r.contributed)}</td><td>${yen(r.value)}</td><td>${yen(r.value - r.contributed)}</td></tr>`).join("") +
     "</tbody>";
 }
 
 async function update() {
   if (!runSim) return;
+  fillTickerSelect();
   syncInputs();
   document.querySelectorAll("#rank tbody tr").forEach(tr =>
     tr.classList.toggle("sel", $("mode").value === "historical" && tr.dataset.ticker === $("ticker").value));
+  document.querySelectorAll("#surges tbody tr").forEach(tr =>
+    tr.classList.toggle("sel", $("mode").value === "surge" && tr.dataset.ticker === $("ticker").value));
   const mode = $("mode").value;
   const initial = Number($("initial").value) || 0;
   const monthly = Number($("monthly").value) || 0;
   const years = Math.max(1, Number($("years").value) || 1);
   const rate = (Number($("rate").value) || 0) / 100;
 
-  let prices = null, pyPrices = null, labels;
-  if (mode === "historical") {
+  let prices = null, pyPrices = null, labels, surge = null;
+  if (mode === "surge") {
+    surge = surgeItems().find(t => t.ticker === $("ticker").value);
+  } else if (mode === "historical") {
     const d = await loadPrices($("ticker").value);
     prices = d.prices;
     pyPrices = py.toPy(prices);
@@ -315,8 +418,12 @@ async function update() {
     $("chart-title").textContent = `資産推移：年率 ${(rate * 100).toFixed(1)}% で ${years} 年`;
   }
 
-  const res = runSim(mode, initial, monthly, years, rate, pyPrices).toJs({ dict_converter: Object.fromEntries });
+  const res = runSim(mode, initial, monthly, years, rate, pyPrices, surge?.close).toJs({ dict_converter: Object.fromEntries });
   pyPrices?.destroy();
+  if (surge) {
+    $("chart-title").textContent = `資産推移：${surge.name}（${surge.ticker}）${$("day").value} の終値 ${yen(surge.close)}`
+      + ` → ${years} 年後 ${yen(res.rows.at(-1).price)}（年率 ${(rate * 100).toFixed(1)}% を維持した場合）`;
+  }
 
   const rows = res.rows;
   labels = prices ? rows.map(r => r.date) : rows.map(r => `${Math.floor(r.month / 12)}年${r.month % 12 ? r.month % 12 + "ヶ月" : ""}`);
@@ -342,6 +449,7 @@ async function main() {
   runHist = py.globals.get("historical_annual_rate");
   $("status").textContent = "条件を変えると自動で再計算します。";
   ["mode", "ticker", "rate", "initial", "monthly", "years"].forEach(id => $(id).addEventListener("input", update));
+  $("day").addEventListener("input", () => { shownMode = null; drawSurges(); update(); });
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", update);
   update();
 }

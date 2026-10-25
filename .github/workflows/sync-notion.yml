@@ -1,0 +1,38 @@
+name: sync Notion → PostgreSQL & deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "急騰日が直近何日の行を同期するか"
+        type: number
+        default: 7
+  # シークレットを設定したら有効化（平日 17:00 JST。株価DB の更新後に実行する）
+  # schedule:
+  #   - cron: "0 8 * * 1-5"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover tests
+      - name: Sync Notion 株価DB to PostgreSQL
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python scripts/sync_notion.py --init-schema --days ${{ inputs.days || 7 }}
+      - name: Export snapshot for the page
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python scripts/export_snapshot.py
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy public --project-name=stock-simulator
