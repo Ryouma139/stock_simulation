@@ -16,7 +16,8 @@
 
 ## データの流れ（Notion → PostgreSQL）
 
-セットアップ手順・テーブルの詳細は [docs/notion-postgres-sync.md](docs/notion-postgres-sync.md) にまとめています。
+全体の構成（画面と Python のつながり、Workers・管理画面・鍵の置き場所）は [docs/system-overview.md](docs/system-overview.md)、
+同期のセットアップ手順・テーブルの詳細は [docs/notion-postgres-sync.md](docs/notion-postgres-sync.md) にまとめています。
 
 ```
 [Notion 📈 株価DB]  銘柄（→ 銘柄レポートページ）・急騰日・終値・前日終値・前日比率・キーワード
