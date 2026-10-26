@@ -117,6 +117,47 @@
   .bar { display: inline-block; height: 6px; border-radius: 0 3px 3px 0; background: var(--series-1); vertical-align: middle; margin-right: 6px; }
   .src { font-size: 12px; color: var(--text-muted); }
   .note { font-size: 12px; color: var(--text-muted); margin-top: 16px; }
+  .more {
+    display: none; width: 100%; margin-top: 8px; padding: 10px; font: inherit; font-size: 14px; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--surface-0); color: var(--text-secondary);
+  }
+
+  /* スマホ：表の枠の中でスクロールさせない（ページのスクロールだけにする）。
+     急騰銘柄・ランキング・一括投資はカード表示にして、横スクロールもなくす */
+  @media (max-width: 640px) {
+    .table-wrap { max-height: none; overflow-x: auto; overscroll-behavior-x: contain; }
+    #surges thead, #rank thead, #lump-table thead { display: none; }
+    #surges, #surges tbody, #rank, #rank tbody, #lump-table, #lump-table tbody { display: block; }
+    #surges tr, #rank tr, #lump-table tr {
+      display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 10px;
+      padding: 12px 4px; border-bottom: 1px solid var(--border);
+    }
+    #surges td, #rank td, #lump-table td, #rank th {
+      display: block; border: 0; padding: 0; text-align: left; white-space: normal; min-width: 0;
+    }
+    #surges td[data-label]::before, #rank td[data-label]::before, #lump-table td[data-label]::before {
+      content: attr(data-label); display: block; font-size: 11px; color: var(--text-muted); font-weight: 400;
+    }
+    /* 急騰銘柄：1 行目に銘柄名、2 行目に終値・前日比・前日終値、3 行目にキーワード */
+    #surges td:first-child { grid-column: 1 / -1; font-weight: 600; }
+    #surges td:last-child { grid-column: 1 / -1; min-width: 0; font-size: 12px; }
+    /* ランキング：左に順位、右の 1 行目に銘柄名、2 行目に急騰記録・前日比・急騰日・人気スコア */
+    #rank tr { grid-template-columns: 22px repeat(4, minmax(0, 1fr)); gap: 2px 8px; padding: 10px 4px; }
+    #rank td:first-child { grid-row: 1 / span 2; font-weight: 600; color: var(--text-secondary); }
+    #rank td:nth-child(2) { grid-column: 2 / -1; font-weight: 600; }
+    #rank .bar, #rank .yr { display: none; }
+    #rank.collapsed tbody tr:nth-child(n+11) { display: none; }  /* スマホは上位 10 件だけ。ボタンで残りを表示 */
+    .more:not([hidden]) { display: block; }
+    /* 結果のタイルは 2 列にする */
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .tile .v { font-size: 18px; }
+    /* 一括投資：1 行目に投資額、2 行目に「1日だけ」と「N年保有」 */
+    #lump-table tr { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #lump-table td:first-child { grid-column: 1 / -1; font-weight: 600; }
+    #lump .v { font-size: 16px; }
+    /* 年ごとの表は列が少ないので、文字と余白を詰めて画面幅に収める */
+    #table th, #table td { padding: 4px 3px; font-size: 12px; }
+  }
 </style>
 </head>
 <body>
@@ -195,6 +236,7 @@
     <h2>人気銘柄ランキング（前日比 +10% 以上の急騰記録）</h2>
     <p>急騰日が新しい銘柄から順に並べ、同じ日の中は人気スコア（何度も・最近・大きく急騰した銘柄ほど高い。30日で重みが半分）の高い順です。前日比・急騰日は直近の急騰のものです。行をクリックすると、その銘柄でシミュレーションします。<span class="src" id="src"></span></p>
     <div class="table-wrap"><table id="rank"></table></div>
+    <button type="button" class="more" id="rank-more" hidden></button>
   </section>
 
   <p class="note">※ シミュレーション結果は将来の運用成果を保証するものではありません。税金・手数料は考慮していません。「急騰銘柄が年率を維持」は株価が一定の年率で上がり続けると仮定した計算で、急騰後の値動きを予測するものではありません。</p>
@@ -290,9 +332,11 @@ function drawSurges() {
     code.className = "code";
     code.textContent = t.ticker;
     name.append(a, code);
-    const cells = [yen(t.close), `+${t.change_pct.toFixed(2)}%`, yen(t.prev_close), t.keywords || "—"].map(c => {
+    const labels = ["終値", "前日比", "前日終値", "キーワード"];  // スマホのカード表示で値の上に出す見出し
+    const cells = [yen(t.close), `+${t.change_pct.toFixed(2)}%`, yen(t.prev_close), t.keywords || "—"].map((c, k) => {
       const td = document.createElement("td");
       td.textContent = c;
+      td.dataset.label = labels[k];
       return td;
     });
     cells[1].className = "up";
@@ -327,8 +371,10 @@ function drawRanking() {
       t.last_change_pct != null ? `+${t.last_change_pct.toFixed(2)}%` : "—",
       t.last_hit_date || "—", null,
     ];
+    const labels = [null, null, "急騰記録", "前日比", "急騰日", "人気スコア"];
     cells.forEach((c, k) => {
       const td = document.createElement("td");
+      if (labels[k]) td.dataset.label = labels[k];
       if (k === 1) {
         const code = document.createElement("span");
         code.className = "code";
@@ -337,6 +383,12 @@ function drawRanking() {
       } else if (k === 3) {
         td.className = "up";
         td.textContent = c;
+      } else if (k === 4 && t.last_hit_date) {
+        // 急騰日。スマホでは年（.yr）を隠して「10-22」だけにする
+        const yr = document.createElement("span");
+        yr.className = "yr";
+        yr.textContent = t.last_hit_date.slice(0, 5);
+        td.append(yr, t.last_hit_date.slice(5));
       } else if (k === 5) {
         const bar = document.createElement("span");
         bar.className = "bar";
@@ -363,6 +415,11 @@ function drawRanking() {
   });
   $("rank").innerHTML = head;
   $("rank").append(tbody);
+  // スマホでは上位 10 件だけを出し、ボタンで残りを開く（PC では .more を表示しない）
+  const rest = ranked.length - 10;
+  $("rank").classList.toggle("collapsed", rest > 0);
+  $("rank-more").hidden = rest <= 0;
+  $("rank-more").textContent = `残り ${rest} 件を表示`;
 }
 
 async function loadPrices(ticker) {
@@ -450,8 +507,9 @@ function drawLump(surge, initial, years, rate) {
   // 10 万円の場合は常に出し、初期投資額が入力されていればその金額の行を足す
   const amounts = [LUMP_REFERENCE, ...(initial > 0 && initial !== LUMP_REFERENCE ? [initial] : [])];
   const shares = (v) => v.toLocaleString("ja-JP", { maximumFractionDigits: 1 }) + " 株";
-  const cell = (res, detail) => {
+  const cell = (res, detail, label) => {
     const td = document.createElement("td");
+    td.dataset.label = label;
     const sign = res.profit >= 0 ? "+" : "";
     const v = document.createElement("div");
     v.className = "v " + (res.profit >= 0 ? "pos" : "neg");
@@ -469,8 +527,8 @@ function drawLump(surge, initial, years, rate) {
     const th = document.createElement("td");
     th.textContent = yen(amount) + (amount === initial ? "（初期投資額）" : "");
     tr.append(th,
-      cell(r.one_day, `${yen(r.one_day.buy_price)} で ${shares(r.one_day.units)} → 評価額 ${yen(r.one_day.value)}`),
-      cell(r.hold, `${yen(r.hold.buy_price)} で ${shares(r.hold.units)} → 評価額 ${yen(r.hold.value)}`));
+      cell(r.one_day, `${yen(r.one_day.buy_price)} で ${shares(r.one_day.units)} → 評価額 ${yen(r.one_day.value)}`, "1日だけ"),
+      cell(r.hold, `${yen(r.hold.buy_price)} で ${shares(r.hold.units)} → 評価額 ${yen(r.hold.value)}`, `${years}年保有`));
     tbody.append(tr);
   });
   $("lump-table").innerHTML = "<thead><tr><th>投資額</th>"
@@ -543,6 +601,7 @@ async function main() {
   $("status").textContent = "条件を変えると自動で再計算します。";
   ["mode", "ticker", "rate", "initial", "monthly", "years"].forEach(id => $(id).addEventListener("input", update));
   $("day").addEventListener("input", () => { shownMode = null; drawSurges(); update(); });
+  $("rank-more").addEventListener("click", () => { $("rank").classList.remove("collapsed"); $("rank-more").hidden = true; });
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", update);
   update();
 }

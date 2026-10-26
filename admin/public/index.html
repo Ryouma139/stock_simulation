@@ -88,6 +88,11 @@
   td.long { white-space: normal; min-width: 240px; color: var(--text-secondary); }
   th { position: sticky; top: 0; background: var(--surface-1); color: var(--text-secondary); font-weight: 500; }
   .msg { font-size: 14px; margin: 8px 0 0; }
+  /* スマホ：表の枠の中で縦にスクロールさせない（列が多いので横スクロールだけ残す） */
+  @media (max-width: 640px) {
+    .table-wrap { max-height: none; overscroll-behavior-x: contain; }
+    .toolbar input { width: 100%; }
+  }
   .msg.ok { color: var(--good); }
   .msg.err { color: var(--critical); }
   .pct { font-weight: 600; }
