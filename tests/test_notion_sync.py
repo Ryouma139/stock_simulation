@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT / "public"))
 from db import SqliteClient  # noqa: E402
 from detect_surges import refresh_scores, save_monthly_prices, save_surges  # noqa: E402
 from export_snapshot import build_snapshot  # noqa: E402
-from sim import run, simulate_fixed, simulate_from_price, surge_lump_sums  # noqa: E402
+from sim import run, simulate_fixed, simulate_from_price, simulate_historical, surge_lump_sums  # noqa: E402
 from sync_notion import block_lines, find_ticker, known_tickers, parse_row, save_notion_surges  # noqa: E402
 
 TODAY = date(2026, 10, 25)
@@ -158,6 +158,22 @@ class SurgeSimTest(unittest.TestCase):
         self.assertAlmostEqual(res["hold"]["value"], 1_000_000 * 1.1 ** 20)            # 急騰日の終値で買って 20 年
         self.assertAlmostEqual(res["hold"]["return_pct"], (1.1 ** 20 - 1) * 100)
         self.assertEqual(surge_lump_sums(0, 102, 130, 20)["one_day"]["profit"], 0)
+
+    def test_held_shares_count_in_principal_at_start_price(self):
+        rows = simulate_from_price(1000, 0, 30000, 1, 0.10, held=500)
+        self.assertEqual(rows[0]["units"], 500)
+        self.assertEqual(rows[0]["contributed"], 500_000)          # 500 株 × 開始時の 1,000 円
+        self.assertAlmostEqual(rows[12]["units"], 500 + sum(30000 / (1000 * 1.1 ** (m / 12)) for m in range(1, 13)))
+        self.assertEqual(simulate_from_price(1000, 0, 30000, 1, 0.10)[0]["units"], 0)
+
+    def test_historical_rows_have_price_units_and_held(self):
+        prices = [{"date": "2026-01", "close": 100.0}, {"date": "2026-02", "close": 200.0}]
+        rows = simulate_historical(prices, 0, 10000)
+        self.assertEqual([(r["price"], r["units"]) for r in rows], [(100.0, 100.0), (200.0, 150.0)])
+        held = simulate_historical(prices, 0, 10000, held=50)
+        self.assertEqual(held[0]["contributed"], 50 * 100 + 10000)  # 持っている 50 株は最初の月の終値で元本に入れる
+        self.assertEqual(held[-1]["value"], 200 * 200.0)            # 50 + 100 + 50 株
+        self.assertEqual(run("historical", 0, 10000, 1, 0.1, prices=prices, held=50)["summary"]["contributed"], 25000)
 
     def test_run_dispatches_surge_mode(self):
         res = run("surge", 0, 30000, 1, 0.10, start_price=1000)

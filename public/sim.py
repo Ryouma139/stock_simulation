@@ -20,16 +20,17 @@ def simulate_fixed(initial, monthly, years, annual_rate=DEFAULT_ANNUAL_RATE):
     return rows
 
 
-def simulate_from_price(start_price, initial, monthly, years, annual_rate=DEFAULT_ANNUAL_RATE):
+def simulate_from_price(start_price, initial, monthly, years, annual_rate=DEFAULT_ANNUAL_RATE, held=0):
     """急騰日の終値を起点に、株価が年率 annual_rate を維持して上がり続けた場合の推移を返す。
 
     初月に initial、以降は毎月 monthly をその時点の株価で買い付ける。
-    評価額は simulate_fixed と同じになり、加えて各月の想定株価（price）と保有株数（units）を返す。
+    held はすでに持っている株数で、開始時点の株価で元本に含める。
+    held が 0 なら評価額は simulate_fixed と同じになる。加えて各月の想定株価（price）と保有株数（units）を返す。
     """
     monthly_growth = (1 + annual_rate) ** (1 / 12)
     price = float(start_price)
-    units = initial / price
-    contributed = float(initial)
+    units = held + initial / price
+    contributed = initial + held * price
     rows = [{"month": 0, "price": price, "units": units, "contributed": contributed, "value": units * price}]
     for m in range(1, int(years * 12) + 1):
         price *= monthly_growth
@@ -65,13 +66,15 @@ def surge_lump_sums(initial, prev_close, close, years, annual_rate=DEFAULT_ANNUA
     }
 
 
-def simulate_historical(prices, initial, monthly):
+def simulate_historical(prices, initial, monthly, held=0):
     """実際の月末終値で毎月同額を買い付けた（ドルコスト平均法）場合の推移を返す。
 
     prices: [{"date": "YYYY-MM", "close": float}, ...] 古い順
+    held はすでに持っている株数で、最初の月の終値で元本に含める。
+    各月の株価（price）と保有株数（units）も返す。
     """
-    units = 0.0
-    contributed = 0.0
+    units = float(held)
+    contributed = held * prices[0]["close"] if prices else 0.0
     rows = []
     for i, p in enumerate(prices):
         buy = monthly + (initial if i == 0 else 0)
@@ -80,6 +83,8 @@ def simulate_historical(prices, initial, monthly):
         rows.append({
             "month": i,
             "date": p["date"],
+            "price": p["close"],
+            "units": units,
             "contributed": contributed,
             "value": units * p["close"],
         })
@@ -106,12 +111,12 @@ def historical_annual_rate(prices):
     return (prices[-1]["close"] / prices[0]["close"]) ** (1 / years) - 1
 
 
-def run(mode, initial, monthly, years, annual_rate, prices=None, start_price=None):
-    """JS から呼ぶエントリポイント。"""
+def run(mode, initial, monthly, years, annual_rate, prices=None, start_price=None, held=0):
+    """JS から呼ぶエントリポイント。held（すでに持っている株数）は株価を使うモードだけで使う。"""
     if mode == "historical" and prices:
-        rows = simulate_historical(prices, initial, monthly)
+        rows = simulate_historical(prices, initial, monthly, held)
     elif mode == "surge" and start_price:
-        rows = simulate_from_price(start_price, initial, monthly, years, annual_rate)
+        rows = simulate_from_price(start_price, initial, monthly, years, annual_rate, held)
     else:
         rows = simulate_fixed(initial, monthly, years, annual_rate)
     return {"rows": rows, "summary": summarize(rows)}

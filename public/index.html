@@ -194,6 +194,9 @@
     <label>初期投資額（円）
       <input id="initial" type="number" value="0" step="10000" min="0">
     </label>
+    <label title="開始時点の株価で元本に含めます">保有株数（株）
+      <input id="held" type="number" value="0" step="100" min="0">
+    </label>
     <label>毎月の積立額（円）
       <input id="monthly" type="number" value="30000" step="1000" min="0">
     </label>
@@ -221,7 +224,7 @@
       <div class="legend">
         <span><i style="background:var(--series-1)"></i>評価額</span>
         <span><i style="background:var(--series-2)"></i>元本</span>
-        <span id="lg-price" hidden><i style="background:var(--series-3)"></i>想定株価（右目盛り）</span>
+        <span id="lg-price" hidden><i style="background:var(--series-3)"></i><span id="lg-price-label">想定株価</span>（右目盛り）</span>
       </div>
     </div>
     <div class="chart-wrap"><canvas id="chart" aria-label="資産推移グラフ" role="img"></canvas></div>
@@ -239,7 +242,7 @@
     <button type="button" class="more" id="rank-more" hidden></button>
   </section>
 
-  <p class="note">※ シミュレーション結果は将来の運用成果を保証するものではありません。税金・手数料は考慮していません。「急騰銘柄が年率を維持」は株価が一定の年率で上がり続けると仮定した計算で、急騰後の値動きを予測するものではありません。</p>
+  <p class="note">※ シミュレーション結果は将来の運用成果を保証するものではありません。税金・手数料は考慮していません。「急騰銘柄が年率を維持」は株価が一定の年率で上がり続けると仮定した計算で、急騰後の値動きを予測するものではありません。「保有株数」はすでに持っている株数で、開始時点の株価（年率維持モードは急騰日の終値、過去株価モードは最初の月の終値）で元本に含めて計算します。</p>
 </main>
 
 <script src="config.js"></script>
@@ -252,6 +255,7 @@ const man = (v) => (v / 10000).toLocaleString("ja-JP", { maximumFractionDigits: 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 let py, runSim, runHist, runLump, chart;
+let updateSeq = 0;  // update() の呼び出し番号。株価の読み込みを待つ間に新しい入力があれば、古い計算は捨てる
 const priceCache = {};
 const API = (window.SIM_API_BASE || "").replace(/\/$/, "");
 let tickers = [];   // DB（人気スコア順）または静的 JSON の銘柄一覧
@@ -398,11 +402,12 @@ function drawRanking() {
       tr.append(td);
     });
     tr.addEventListener("click", () => {
-      // 月次株価があれば過去株価モード、無ければその銘柄の直近の急騰日で急騰モードにする
+      // 月次株価があれば過去株価モード、無ければその銘柄の直近の急騰日で急騰モードにする。
+      // どちらのモードでも、上の「急騰銘柄」の急騰日はその銘柄の直近の急騰日に合わせる
       const day = surgeDays.find(d => d.items.some(x => x.ticker === t.ticker));
       if (!t.file && !useApi && !day) return;
       $("mode").value = t.file || useApi ? "historical" : "surge";
-      if ($("mode").value === "surge" && day.date !== $("day").value) {
+      if (day && day.date !== $("day").value) {
         $("day").value = day.date;
         shownMode = null;
         drawSurges();
@@ -439,7 +444,11 @@ function syncInputs() {
   $("rate").disabled = mode === "historical";
   $("years").disabled = mode === "historical";
   $("ticker").disabled = mode === "fixed";
+  $("held").disabled = mode === "fixed";  // 株価を使わないモードでは株数を持てない
 }
+
+// 株価の列・線の名前。過去株価モードは実際の株価、年率維持モードは想定の株価
+const priceLabel = () => $("mode").value === "historical" ? "株価" : "想定株価";
 
 function drawChart(rows, labels) {
   const data = {
@@ -451,10 +460,11 @@ function drawChart(rows, labels) {
         backgroundColor: css("--series-2"), borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, tension: 0 },
     ],
   };
-  // 急騰モードは評価額がどの銘柄でも同じになるので、銘柄ごとに違う想定株価を右目盛りで重ねる
+  // 株価を使うモードは、株価を右目盛りで重ねる（年率維持モードは評価額がどの銘柄でも同じになるため、銘柄の違いはここに出る）
   const withPrice = rows[0].price != null;
+  $("lg-price-label").textContent = priceLabel();
   if (withPrice) {
-    data.datasets.push({ label: "想定株価", data: rows.map(r => r.price), yAxisID: "y2", borderColor: css("--series-3"),
+    data.datasets.push({ label: priceLabel(), data: rows.map(r => r.price), yAxisID: "y2", borderColor: css("--series-3"),
       backgroundColor: css("--series-3"), borderWidth: 2, borderDash: [6, 4], pointRadius: 0, pointHoverRadius: 5, tension: 0.15 });
   }
   $("lg-price").hidden = !withPrice;
@@ -489,10 +499,10 @@ function drawChart(rows, labels) {
 function drawTable(rows, labels) {
   const yearly = rows.filter((_, i) => i % 12 === 0 || i === rows.length - 1);
   const idx = rows.map((_, i) => i).filter(i => i % 12 === 0 || i === rows.length - 1);
-  const withPrice = rows[0].price != null;  // 急騰モードは想定株価と保有株数も出す
+  const withPrice = rows[0].price != null;  // 株価を使うモードは株価と保有株数も出す
   const shares = (v) => v.toLocaleString("ja-JP", { maximumFractionDigits: 1 }) + " 株";
   $("table").innerHTML =
-    "<thead><tr><th>時点</th>" + (withPrice ? "<th>想定株価</th><th>保有株数</th>" : "") +
+    "<thead><tr><th>時点</th>" + (withPrice ? `<th>${priceLabel()}</th><th>保有株数</th>` : "") +
     "<th>元本</th><th>評価額</th><th>損益</th></tr></thead><tbody>" +
     yearly.map((r, k) => `<tr><td>${labels[idx[k]]}</td>` +
       (withPrice ? `<td>${yen(r.price)}</td><td>${shares(r.units)}</td>` : "") +
@@ -542,14 +552,16 @@ const LUMP_REFERENCE = 100000;  // 一括投資の目安として常に表示す
 
 async function update() {
   if (!runSim) return;
+  const seq = ++updateSeq;
   fillTickerSelect();
   syncInputs();
   document.querySelectorAll("#rank tbody tr").forEach(tr =>
     tr.classList.toggle("sel", $("mode").value === "historical" && tr.dataset.ticker === $("ticker").value));
   document.querySelectorAll("#surges tbody tr").forEach(tr =>
-    tr.classList.toggle("sel", $("mode").value === "surge" && tr.dataset.ticker === $("ticker").value));
+    tr.classList.toggle("sel", $("mode").value !== "fixed" && tr.dataset.ticker === $("ticker").value));
   const mode = $("mode").value;
   const initial = Number($("initial").value) || 0;
+  const held = Math.max(0, Number($("held").value) || 0);
   const monthly = Number($("monthly").value) || 0;
   const years = Math.max(1, Number($("years").value) || 1);
   const rate = (Number($("rate").value) || 0) / 100;
@@ -559,6 +571,7 @@ async function update() {
     surge = surgeItems().find(t => t.ticker === $("ticker").value);
   } else if (mode === "historical") {
     const d = await loadPrices($("ticker").value);
+    if (seq !== updateSeq) return;  // 読み込み中に条件が変わった（新しい update() が画面を描く）
     prices = d.prices;
     pyPrices = py.toPy(prices);
     const cagr = runHist(pyPrices) * 100;
@@ -567,7 +580,7 @@ async function update() {
     $("chart-title").textContent = `資産推移：年率 ${(rate * 100).toFixed(1)}% で ${years} 年`;
   }
 
-  const res = runSim(mode, initial, monthly, years, rate, pyPrices, surge?.close).toJs({ dict_converter: Object.fromEntries });
+  const res = runSim(mode, initial, monthly, years, rate, pyPrices, surge?.close, held).toJs({ dict_converter: Object.fromEntries });
   pyPrices?.destroy();
   if (surge) {
     $("chart-title").textContent = `資産推移：${surge.name}（${surge.ticker}）${$("day").value} の終値 ${yen(surge.close)}`
@@ -599,7 +612,7 @@ async function main() {
   runHist = py.globals.get("historical_annual_rate");
   runLump = py.globals.get("surge_lump_sums");
   $("status").textContent = "条件を変えると自動で再計算します。";
-  ["mode", "ticker", "rate", "initial", "monthly", "years"].forEach(id => $(id).addEventListener("input", update));
+  ["mode", "ticker", "rate", "initial", "held", "monthly", "years"].forEach(id => $(id).addEventListener("input", update));
   $("day").addEventListener("input", () => { shownMode = null; drawSurges(); update(); });
   $("rank-more").addEventListener("click", () => { $("rank").classList.remove("collapsed"); $("rank-more").hidden = true; });
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", update);
